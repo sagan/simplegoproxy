@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/sagan/simplegoproxy/util"
 )
@@ -22,10 +21,13 @@ const (
 	SUB_PREFIX             = "sub_"
 	CORS_STRING            = "cors"
 	PROXY_STRING           = "proxy"
+	IMPERSONATE_STRING     = "impersonate"
 	FORCESUB_STRING        = "forcesub"
 	NOCSP_STRING           = "nocsp"
 	TIMEOUT_STRING         = "timeout"
 	INSECURE_STRING        = "insecure"
+	COOKIE_STRING          = "cookie"
+	BASICAUTH_STRING       = "basicauth"
 )
 
 var (
@@ -34,15 +36,37 @@ var (
 
 func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string) {
 	defer r.Body.Close()
-	log.Printf("Access: path=%s, query=%s", r.URL.Path, r.URL.RawQuery)
-	url := r.URL.Path
-	if r.URL.RawQuery != "" {
-		url += "?" + r.URL.RawQuery
+	targetUrl := r.URL.Path
+	modparams := ""
+	// accept "_sgp_a=1/https://ipcfg.io/json" style request url
+	if strings.HasPrefix(targetUrl, prefix) {
+		index := strings.Index(targetUrl, "/")
+		if index == -1 {
+			w.WriteHeader(400)
+			w.Write([]byte("Invalid url"))
+			return
+		}
+		modparams = targetUrl[:index]
+		targetUrl = targetUrl[index+1:]
 	}
-	if !util.IsUrl(url) {
-		url = "https://" + url
+	targetUrlObj, err := url.Parse(targetUrl)
+	if err != nil {
+		w.WriteHeader(400)
+		w.Write([]byte(fmt.Sprintf("Failed to parse url %s: %v", targetUrl, err)))
+		return
 	}
-	response, err := FetchUrl(url, r, prefix)
+	if targetUrlObj.Scheme == "" {
+		targetUrlObj.Scheme = "https"
+	}
+	if targetUrlObj.Host != "" && targetUrlObj.Path == "" {
+		targetUrlObj.Path = "/"
+	}
+	targetUrlObj.RawQuery = r.URL.RawQuery
+	if targetUrlObj.RawQuery != "" && modparams != "" {
+		targetUrlObj.RawQuery += "&"
+	}
+	targetUrlObj.RawQuery += modparams
+	response, err := FetchUrl(targetUrlObj, r, prefix)
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(fmt.Sprintf("Failed to fetch url: %v", err)))
@@ -58,11 +82,7 @@ func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string) {
 	io.Copy(w, response.Body)
 }
 
-func FetchUrl(urlStr string, srReq *http.Request, prefix string) (*http.Response, error) {
-	urlObj, err := url.Parse(urlStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse url %s : %v", urlStr, err)
-	}
+func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Response, error) {
 	urlQuery := urlObj.Query()
 	headers := map[string]string{}
 	responseHeaders := map[string]string{}
@@ -72,7 +92,10 @@ func FetchUrl(urlStr string, srReq *http.Request, prefix string) (*http.Response
 	forcesub := false
 	nocsp := false
 	proxy := ""
+	impersonate := ""
 	timeout := 0
+	cookie := ""
+	basicauth := ""
 	for key, values := range urlQuery {
 		if !strings.HasPrefix(key, prefix) {
 			continue
@@ -91,6 +114,12 @@ func FetchUrl(urlStr string, srReq *http.Request, prefix string) (*http.Response
 			nocsp = true
 		case PROXY_STRING:
 			proxy = value
+		case IMPERSONATE_STRING:
+			impersonate = value
+		case COOKIE_STRING:
+			cookie = value
+		case BASICAUTH_STRING:
+			basicauth = value
 		case TIMEOUT_STRING:
 			if t, err := strconv.Atoi(value); err != nil {
 				return nil, fmt.Errorf("failed to parse timtout %s: %v", value, err)
@@ -118,43 +147,20 @@ func FetchUrl(urlStr string, srReq *http.Request, prefix string) (*http.Response
 			}
 		}
 	}
+	if urlObj.User != nil {
+		basicauth = urlObj.User.String()
+		urlObj.User = nil
+	}
+	if cookie != "" {
+		headers["Cookie"] = cookie
+	}
+	if basicauth != "" {
+		headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicauth))
+	}
 	urlObj.RawQuery = urlQuery.Encode()
-	urlStr = urlObj.String()
-	log.Printf("Fetch: url=%s, headers=%v", urlStr, headers)
-	req, err := http.NewRequest("GET", urlStr, nil)
-	if err != nil {
-		return nil, err
-	}
-	for key, value := range headers {
-		if value != "" {
-			req.Header.Set(key, value)
-		} else {
-			req.Header.Del(key)
-		}
-	}
-	var httpClient *http.Client
-	if insecure || proxy != "" || timeout > 0 {
-		httpClient = &http.Client{
-			Timeout: time.Duration(timeout) * time.Second,
-		}
-		if insecure || proxy != "" {
-			var proxyFunc func(*http.Request) (*url.URL, error)
-			if proxy != "" {
-				proxyUrl, err := url.Parse(proxy)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse proxy %s: %v", proxy, err)
-				}
-				proxyFunc = http.ProxyURL(proxyUrl)
-			}
-			httpClient.Transport = &http.Transport{
-				Proxy:           proxyFunc,
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
-			}
-		}
-	} else {
-		httpClient = http.DefaultClient
-	}
-	res, err := httpClient.Do(req)
+	urlStr := urlObj.String()
+	log.Printf("Fetch: url=%s", urlStr)
+	res, err := util.FetchUrl(urlStr, impersonate, insecure, timeout, proxy, headers)
 	if err != nil {
 		return res, err
 	}

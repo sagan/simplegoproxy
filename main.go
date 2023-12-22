@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sagan/simplegoproxy/util"
 	"github.com/sagan/simplegoproxy/version"
 )
 
@@ -44,6 +45,7 @@ func main() {
 		rootpath += "/"
 	}
 	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s\n", version.Version, port, rootpath)
+	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
 
 	proxyHandle := http.StripPrefix(rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxyFunc(w, r, prefix)
