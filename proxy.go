@@ -28,10 +28,19 @@ const (
 	INSECURE_STRING        = "insecure"
 	COOKIE_STRING          = "cookie"
 	BASICAUTH_STRING       = "basicauth"
+	FDHEADERS_STRING       = "fdheaders"
+	BODY_STRING            = "body"
+	TYPE_STRING            = "type"
+	METHOD_STRING          = "method"
 )
 
 var (
-	TEXT_MIMES = []string{"text/html", "application/json", "text/json", "text/plain", "text/csv"}
+	TEXTUAL_MIMES = []string{
+		"application/json",
+		"application/xml",
+		"application/atom+xml",
+		"application/x-sh",
+	}
 )
 
 func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string) {
@@ -96,6 +105,10 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Respon
 	timeout := 0
 	cookie := ""
 	basicauth := ""
+	fdheaders := ""
+	body := ""
+	contentType := ""
+	method := http.MethodGet
 	for key, values := range urlQuery {
 		if !strings.HasPrefix(key, prefix) {
 			continue
@@ -120,6 +133,14 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Respon
 			cookie = value
 		case BASICAUTH_STRING:
 			basicauth = value
+		case METHOD_STRING:
+			method = strings.ToUpper(value)
+		case FDHEADERS_STRING:
+			fdheaders = value
+		case BODY_STRING:
+			body = value
+		case TYPE_STRING:
+			contentType = value
 		case TIMEOUT_STRING:
 			if t, err := strconv.Atoi(value); err != nil {
 				return nil, fmt.Errorf("failed to parse timtout %s: %v", value, err)
@@ -131,12 +152,12 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Respon
 				if strings.HasPrefix(key, HEADER_PREFIX) {
 					h := key[len(HEADER_PREFIX):]
 					if h != "" {
-						headers[h] = value
+						headers[strings.ToLower(h)] = value
 					}
 				} else if strings.HasPrefix(key, RESPONSE_HEADER_PREFIX) {
 					h := key[len(RESPONSE_HEADER_PREFIX):]
 					if h != "" {
-						responseHeaders[h] = value
+						responseHeaders[strings.ToLower(h)] = value
 					}
 				} else if strings.HasPrefix(key, SUB_PREFIX) {
 					h := key[len(SUB_PREFIX):]
@@ -152,19 +173,44 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Respon
 		urlObj.User = nil
 	}
 	if cookie != "" {
-		headers["Cookie"] = cookie
+		headers["cookie"] = cookie
 	}
 	if basicauth != "" {
-		headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicauth))
+		headers["authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicauth))
+	}
+	if contentType != "" {
+		headers["content-type"] = contentType
+	}
+	if headers["content-type"] == "" && method == http.MethodPost && body != "" {
+		headers["content-type"] = "application/x-www-form-urlencoded"
+	}
+	forwardHeaders := []string{"Range", "If-Range"}
+	if fdheaders != "" {
+		forwardHeaders = append(forwardHeaders, strings.Split(fdheaders, ",")...)
+	}
+	for _, h := range forwardHeaders {
+		if v := srReq.Header.Get(h); v != "" {
+			headers[strings.ToLower(h)] = v
+		}
 	}
 	urlObj.RawQuery = urlQuery.Encode()
 	urlStr := urlObj.String()
 	log.Printf("Fetch: url=%s", urlStr)
-	res, err := util.FetchUrl(urlStr, impersonate, insecure, timeout, proxy, headers)
+	var reqBody io.Reader
+	if body != "" {
+		reqBody = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, urlStr, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("invalid http request: %v", err)
+	}
+	res, err := util.FetchUrl(req, impersonate, insecure, timeout, proxy, headers)
 	if err != nil {
 		return res, err
 	}
 	res.Header.Del("Strict-Transport-Security")
+	res.Header.Del("Clear-Site-Data")
+	res.Header.Del("Set-Cookie")
 	if cors {
 		res.Header.Set("Access-Control-Allow-Origin", "*")
 		res.Header.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -191,7 +237,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Respon
 		if !doSub {
 			if contentType := res.Header.Get("Content-Type"); contentType != "" {
 				mime, _, _ := mime.ParseMediaType(contentType)
-				if mime != "" && slices.Index(TEXT_MIMES, mime) != -1 {
+				if mime != "" && (strings.HasPrefix(mime, "text/") || slices.Index(TEXTUAL_MIMES, mime) != -1) {
 					doSub = true
 				}
 			}

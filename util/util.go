@@ -1,14 +1,13 @@
 package util
 
 import (
-	"bytes"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Noooste/azuretls-client"
@@ -62,13 +61,9 @@ var impersonateProfiles = map[string]*impersonateProfile{
 	},
 }
 
-func FetchUrl(urlStr string, impersonate string, insecure bool, timeout int, proxy string,
+func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int, proxy string,
 	headers map[string]string) (*http.Response, error) {
 	if impersonate == "" {
-		req, err := http.NewRequest("GET", urlStr, nil)
-		if err != nil {
-			return nil, err
-		}
 		for key, value := range headers {
 			if value != "" {
 				req.Header.Set(key, value)
@@ -133,14 +128,15 @@ func FetchUrl(urlStr string, impersonate string, insecure bool, timeout int, pro
 		allHeaders = append(allHeaders, []string{key, value})
 	}
 	for _, header := range allHeaders {
-		if index, ok := headerIndexs[header[0]]; ok {
+		headerLowerCase := strings.ToLower(header[0])
+		if index, ok := headerIndexs[headerLowerCase]; ok {
 			effectHeaders[index] = []string{header[0], header[1]}
 			if header[1] == "" {
-				delete(headerIndexs, header[0])
+				delete(headerIndexs, headerLowerCase)
 			}
 		} else if header[1] != "" {
 			effectHeaders = append(effectHeaders, []string{header[0], header[1]})
-			headerIndexs[header[0]] = len(headers) - 1
+			headerIndexs[headerLowerCase] = len(headers) - 1
 		}
 	}
 	orderedHeaders := azuretls.OrderedHeaders{}
@@ -151,7 +147,11 @@ func FetchUrl(urlStr string, impersonate string, insecure bool, timeout int, pro
 		orderedHeaders = append(orderedHeaders, header)
 	}
 
-	res, err := session.Get(urlStr, orderedHeaders)
+	res, err := session.Do(&azuretls.Request{
+		Method:     req.Method,
+		Url:        req.URL.String(),
+		IgnoreBody: true,
+	}, orderedHeaders)
 	if err != nil {
 		if _, ok := err.(net.Error); ok {
 			return nil, fmt.Errorf("failed to fetch url: <network error>: %v", err)
@@ -161,6 +161,6 @@ func FetchUrl(urlStr string, impersonate string, insecure bool, timeout int, pro
 	return &http.Response{
 		StatusCode: res.StatusCode,
 		Header:     http.Header(res.Header),
-		Body:       io.NopCloser(bytes.NewReader(res.Body)),
+		Body:       res.RawBody,
 	}, nil
 }

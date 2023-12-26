@@ -46,6 +46,7 @@ func main() {
 	}
 	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s\n", version.Version, port, rootpath)
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
+	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(TEXTUAL_MIMES, ", "))
 
 	proxyHandle := http.StripPrefix(rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxyFunc(w, r, prefix)
