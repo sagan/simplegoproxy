@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -32,6 +35,7 @@ const (
 	BODY_STRING            = "body"
 	TYPE_STRING            = "type"
 	METHOD_STRING          = "method"
+	SIGN_STRING            = "sign"
 )
 
 var (
@@ -43,9 +47,9 @@ var (
 	}
 )
 
-func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string) {
+func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string) {
 	defer r.Body.Close()
-	targetUrl := r.URL.Path
+	targetUrl := r.URL.EscapedPath()
 	modparams := ""
 	// accept "_sgp_a=1/https://ipcfg.io/json" style request url
 	if strings.HasPrefix(targetUrl, prefix) {
@@ -75,7 +79,7 @@ func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string) {
 		targetUrlObj.RawQuery += "&"
 	}
 	targetUrlObj.RawQuery += modparams
-	response, err := FetchUrl(targetUrlObj, r, prefix)
+	response, err := FetchUrl(targetUrlObj, r, prefix, key)
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(fmt.Sprintf("Failed to fetch url: %v", err)))
@@ -91,7 +95,7 @@ func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string) {
 	io.Copy(w, response.Body)
 }
 
-func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Response, error) {
+func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (*http.Response, error) {
 	urlQuery := urlObj.Query()
 	headers := map[string]string{}
 	responseHeaders := map[string]string{}
@@ -109,6 +113,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Respon
 	body := ""
 	contentType := ""
 	method := http.MethodGet
+	sign := ""
 	for key, values := range urlQuery {
 		if !strings.HasPrefix(key, prefix) {
 			continue
@@ -141,6 +146,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Respon
 			body = value
 		case TYPE_STRING:
 			contentType = value
+		case SIGN_STRING:
+			sign = value
 		case TIMEOUT_STRING:
 			if t, err := strconv.Atoi(value); err != nil {
 				return nil, fmt.Errorf("failed to parse timtout %s: %v", value, err)
@@ -166,6 +173,25 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string) (*http.Respon
 					}
 				}
 			}
+		}
+	}
+	if key != "" {
+		signUrlQuery := urlObj.Query()
+		signUrlQuery.Del(prefix + SIGN_STRING)
+		urlObj.RawQuery = signUrlQuery.Encode()
+		signUrl := urlObj.String()
+		if sign == "" {
+			return nil, fmt.Errorf(`sign for url "%s" required`, signUrl)
+		}
+		messageMAC, err := hex.DecodeString(sign)
+		if err != nil {
+			return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
+		}
+		mac := hmac.New(sha256.New, []byte(key))
+		mac.Write([]byte(signUrl))
+		expectedMAC := mac.Sum(nil)
+		if !hmac.Equal(messageMAC, expectedMAC) {
+			return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
 		}
 	}
 	if urlObj.User != nil {

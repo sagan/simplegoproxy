@@ -63,6 +63,7 @@ var impersonateProfiles = map[string]*impersonateProfile{
 
 func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int, proxy string,
 	headers map[string]string) (*http.Response, error) {
+	reqUrl := req.URL.String()
 	if impersonate == "" {
 		for key, value := range headers {
 			if value != "" {
@@ -84,6 +85,8 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 						return nil, fmt.Errorf("failed to parse proxy %s: %v", proxy, err)
 					}
 					proxyFunc = http.ProxyURL(proxyUrl)
+				} else {
+					proxyFunc = http.ProxyFromEnvironment
 				}
 				httpClient.Transport = &http.Transport{
 					Proxy:           proxyFunc,
@@ -110,6 +113,9 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 		if err := session.ApplyHTTP2(ip.h2fingerpring); err != nil {
 			return nil, fmt.Errorf("failed to set h2 finterprint: %v", err)
 		}
+	}
+	if proxy == "" {
+		proxy = ParseProxyFromEnv(reqUrl)
 	}
 	if proxy != "" {
 		if err := session.SetProxy(proxy); err != nil {
@@ -149,7 +155,7 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 
 	res, err := session.Do(&azuretls.Request{
 		Method:     req.Method,
-		Url:        req.URL.String(),
+		Url:        reqUrl,
 		IgnoreBody: true,
 	}, orderedHeaders)
 	if err != nil {
@@ -163,4 +169,20 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 		Header:     http.Header(res.Header),
 		Body:       res.RawBody,
 	}, nil
+}
+
+// Parse standard HTTP_PROXY, HTTPS_PROXY, NO_PROXY (and lowercase versions) envs, return proxy for urlStr.
+func ParseProxyFromEnv(urlStr string) string {
+	if urlStr == "" {
+		return ""
+	}
+	urlObj, err := url.Parse(urlStr)
+	if err != nil {
+		return ""
+	}
+	proxyUrl, err := http.ProxyFromEnvironment(&http.Request{URL: urlObj})
+	if err != nil || proxyUrl == nil {
+		return ""
+	}
+	return proxyUrl.String()
 }
