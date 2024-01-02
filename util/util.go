@@ -127,7 +127,7 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 	}
 
 	allHeaders := [][]string{}
-	effectHeaders := [][]string{}
+	effectiveHeaders := [][]string{}
 	headerIndexs := map[string]int{}
 	allHeaders = append(allHeaders, ip.headers...)
 	for key, value := range headers {
@@ -136,17 +136,17 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 	for _, header := range allHeaders {
 		headerLowerCase := strings.ToLower(header[0])
 		if index, ok := headerIndexs[headerLowerCase]; ok {
-			effectHeaders[index] = []string{header[0], header[1]}
+			effectiveHeaders[index] = []string{header[0], header[1]}
 			if header[1] == "" {
 				delete(headerIndexs, headerLowerCase)
 			}
 		} else if header[1] != "" {
-			effectHeaders = append(effectHeaders, []string{header[0], header[1]})
-			headerIndexs[headerLowerCase] = len(headers) - 1
+			effectiveHeaders = append(effectiveHeaders, []string{header[0], header[1]})
+			headerIndexs[headerLowerCase] = len(effectiveHeaders) - 1
 		}
 	}
 	orderedHeaders := azuretls.OrderedHeaders{}
-	for _, header := range effectHeaders {
+	for _, header := range effectiveHeaders {
 		if header[1] == "" || header[1] == HTTP_HEADER_PLACEHOLDER {
 			continue
 		}
