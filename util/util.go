@@ -13,12 +13,13 @@ import (
 	"github.com/Noooste/azuretls-client"
 )
 
-type impersonateProfile struct {
+type ImpersonateProfile struct {
 	// "chrome", "firefox", "opera", "safari", "edge", "ios", "android"
-	navigator     string
-	ja3           string
-	h2fingerpring string
-	headers       [][]string // use "\n" as placeholder for order; use "" (empty) to delete a header
+	Navigator     string
+	Ja3           string
+	H2fingerpring string
+	Headers       [][]string // use "\n" as placeholder for order; use "" (empty) to delete a header
+	Comment       string
 }
 
 const (
@@ -31,18 +32,19 @@ var (
 )
 
 func init() {
-	for key := range impersonateProfiles {
+	for key := range ImpersonateProfiles {
 		Impersonates = append(Impersonates, key)
 	}
 	slices.Sort(Impersonates)
 }
 
-var impersonateProfiles = map[string]*impersonateProfile{
+var ImpersonateProfiles = map[string]*ImpersonateProfile{
 	"chrome120": {
-		navigator:     "chrome",
-		ja3:           "772,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,65281-45-11-65037-18-5-51-0-23-27-43-16-10-35-17513-13,29-23-24,0",
-		h2fingerpring: "1:65536,2:0,4:6291456,6:262144|15663105|0|m,a,s,p",
-		headers: [][]string{
+		Navigator:     "chrome",
+		Comment:       "Chrome 120 on Windows 11 x64 en-US",
+		Ja3:           "772,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,65281-45-11-65037-18-5-51-0-23-27-43-16-10-35-17513-13,29-23-24,0",
+		H2fingerpring: "1:65536,2:0,4:6291456,6:262144|15663105|0|m,a,s,p",
+		Headers: [][]string{
 			{"Cache-Control", "max-age=0"},
 			{"Sec-Ch-Ua", `"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"`},
 			{"Sec-Ch-Ua-Mobile", `?0`},
@@ -59,9 +61,31 @@ var impersonateProfiles = map[string]*impersonateProfile{
 			{"Cookie", HTTP_HEADER_PLACEHOLDER},
 		},
 	},
+	"firefox121": {
+		Navigator: "firefox",
+		Comment:   "Firefox 121 on Windows 11 x64 en-US",
+		// Ja3:           "772,4865-4867-4866-49195-49199-52393-52392-49196-49200-49162-49161-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-34-51-43-13-45-28-65037,29-23-24-25-256-257,0",
+		// utls do not support TLS 34 delegated_credentials (34) (IANA) extension at this time.
+		// see https://github.com/refraction-networking/utls/issues/274
+		Ja3:           "772,4865-4867-4866-49195-49199-52393-52392-49196-49200-49162-49161-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-51-43-13-45-28-65037,29-23-24-25-256-257,0",
+		H2fingerpring: "1:65536,4:131072,5:16384|12517377|3:0:0:201,5:0:0:101,7:0:0:1,9:0:7:1,11:0:3:1,13:0:0:241|m,p,a,s",
+		Headers: [][]string{
+			{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"},
+			{"Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
+			{"Accept-Language", "en-US,en;q=0.5"},
+			{"Accept-Encoding", "gzip, deflate, br"},
+			{"Cookie", HTTP_HEADER_PLACEHOLDER},
+			{"Upgrade-Insecure-Requests", "1"},
+			{"Sec-Fetch-Dest", `document`},
+			{"Sec-Fetch-Mode", `navigate`},
+			{"Sec-Fetch-Site", `none`},
+			{"Sec-Fetch-User", `?1`},
+			{"te", "trailers"},
+		},
+	},
 }
 
-func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int, proxy string,
+func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int, proxy string, norf bool,
 	headers map[string]string) (*http.Response, error) {
 	reqUrl := req.URL.String()
 	if impersonate == "" {
@@ -73,7 +97,7 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 			}
 		}
 		var httpClient *http.Client
-		if insecure || proxy != "" || timeout > 0 {
+		if insecure || norf || proxy != "" || timeout > 0 {
 			httpClient = &http.Client{
 				Timeout: time.Duration(timeout) * time.Second,
 			}
@@ -93,24 +117,29 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 					TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
 				}
 			}
+			if norf {
+				httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+					return http.ErrUseLastResponse
+				}
+			}
 		} else {
 			httpClient = http.DefaultClient
 		}
 		return httpClient.Do(req)
 	}
-	ip := impersonateProfiles[impersonate]
+	ip := ImpersonateProfiles[impersonate]
 	if ip == nil {
 		return nil, fmt.Errorf("impersonate target %s not supported", impersonate)
 	}
 	session := azuretls.NewSession()
 	session.SetTimeout(time.Duration(timeout) * time.Second)
-	if ip.ja3 != "" {
-		if err := session.ApplyJa3(ip.ja3, ip.navigator); err != nil {
+	if ip.Ja3 != "" {
+		if err := session.ApplyJa3(ip.Ja3, ip.Navigator); err != nil {
 			return nil, fmt.Errorf("failed to set ja3: %v", err)
 		}
 	}
-	if ip.h2fingerpring != "" {
-		if err := session.ApplyHTTP2(ip.h2fingerpring); err != nil {
+	if ip.H2fingerpring != "" {
+		if err := session.ApplyHTTP2(ip.H2fingerpring); err != nil {
 			return nil, fmt.Errorf("failed to set h2 finterprint: %v", err)
 		}
 	}
@@ -129,7 +158,7 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 	allHeaders := [][]string{}
 	effectiveHeaders := [][]string{}
 	headerIndexs := map[string]int{}
-	allHeaders = append(allHeaders, ip.headers...)
+	allHeaders = append(allHeaders, ip.Headers...)
 	for key, value := range headers {
 		allHeaders = append(allHeaders, []string{key, value})
 	}
@@ -154,9 +183,10 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 	}
 
 	res, err := session.Do(&azuretls.Request{
-		Method:     req.Method,
-		Url:        reqUrl,
-		IgnoreBody: true,
+		Method:           req.Method,
+		Url:              reqUrl,
+		IgnoreBody:       true,
+		DisableRedirects: norf,
 	}, orderedHeaders)
 	if err != nil {
 		if _, ok := err.(net.Error); ok {

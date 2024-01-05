@@ -2,7 +2,7 @@ package version
 
 var (
 	VersionSuffix = "" // eg. DEV
-	VersionTag    = "v0.4.1"
+	VersionTag    = "v0.4.2"
 	Version       = ""
 )
 

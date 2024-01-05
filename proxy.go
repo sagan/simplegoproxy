@@ -23,6 +23,7 @@ const (
 	RESPONSE_HEADER_PREFIX = "resheader_"
 	SUB_PREFIX             = "sub_"
 	CORS_STRING            = "cors"
+	NORF_STRING            = "norf"
 	PROXY_STRING           = "proxy"
 	IMPERSONATE_STRING     = "impersonate"
 	FORCESUB_STRING        = "forcesub"
@@ -104,6 +105,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (
 	insecure := false
 	forcesub := false
 	nocsp := false
+	norf := false // no redirect following
 	proxy := ""
 	impersonate := ""
 	timeout := 0
@@ -130,6 +132,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (
 			forcesub = true
 		case NOCSP_STRING:
 			nocsp = true
+		case NORF_STRING:
+			norf = true
 		case PROXY_STRING:
 			proxy = value
 		case IMPERSONATE_STRING:
@@ -230,7 +234,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (
 	if err != nil {
 		return nil, fmt.Errorf("invalid http request: %v", err)
 	}
-	res, err := util.FetchUrl(req, impersonate, insecure, timeout, proxy, headers)
+	res, err := util.FetchUrl(req, impersonate, insecure, timeout, proxy, norf, headers)
 	if err != nil {
 		return res, err
 	}

@@ -70,6 +70,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_cors` : (Value ignored) Add the CORS-allow-all headers to original response.
 - `_sgp_nocsp` : (Value ignored) Remove the [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP) (CSP) headers from original response.
 - `_sgp_insecure` : (Value ignored) Ignore any TLS cert error in http request.
+- `_sgp_norf` : (Value ignored) Do not follow redirects.
 - `_sgp_proxy=socks5://1.2.3.4:1080` : Set the proxy for the http request.
 - `_sgp_timeout=5` : Set the timeout for the http request (seconds).
 - `_sgp_method=GET` : Set the method for the http request. Default to `GET`.
@@ -83,7 +84,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. Note the following headers will ALWAYS be "forwarded", even if not set: "Range", "If-Range".
 - `_sgp_basicauth=user:password` : Set the HTTP Basic Authentication for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below.
-- `_sgp_sign` : The sign of request canonical url. See below.
+- `_sgp_sign=<value>` : The sign of request canonical url. See below.
 
 Modification paramaters are set in Query Variables. All `_sgp_*` parameters are stripped from the target url when Simplegoproxy fetch it. E.g.: the `http://localhost:3000/https://ipcfg.co/json?abc=1&_sgp_cors` entry will actually fetch the `https://ipcfg.co/json?abc=1` target url.
 
@@ -107,7 +108,10 @@ Simplegoproxy can impersonate itself as Browser when sending http request to tar
 http://localhost:3000/_sgp_impersonate=chrome120/https://ipcfg.co/json
 ```
 
-Currently, only `chrome120` (Chrome v120 on Windows 11 en-US) target is supported. Simplegoproxy will print the list of supported targets when starting.
+Simplegoproxy will print the list of supported targets when starting. Currently supported impersonates:
+
+- `chrome120` : Chrome 120 on Windows 11 x64 en-US
+- `firefox121` : Firefox 121 on Windows 11 x64 en-US
 
 ## Security tips
 
