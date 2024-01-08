@@ -145,3 +145,9 @@ http://localhost:3000/_sgp_cors&_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8
 # or
 http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors
 ```
+
+### Secret substitution
+
+If request signing is enabled, all `__SECRET_**__` style substrings in modification parameter value or normal query variable will be replaced with the value of the corresponding `SECRET_**` environment variable, if it exists, when sending request to the target url.
+
+The substitution happens after the request signing verification.

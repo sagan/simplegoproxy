@@ -11,6 +11,8 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -96,7 +98,7 @@ func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string
 	io.Copy(w, response.Body)
 }
 
-func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (*http.Response, error) {
+func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey string) (*http.Response, error) {
 	urlQuery := urlObj.Query()
 	headers := map[string]string{}
 	responseHeaders := map[string]string{}
@@ -117,6 +119,13 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (
 	method := http.MethodGet
 	sign := ""
 	for key, values := range urlQuery {
+		// only do secret substitution if request signing is enabled
+		if signkey != "" {
+			for i := range values {
+				values[i] = applySecrets(values[i])
+			}
+			urlQuery[key] = values
+		}
 		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
@@ -179,7 +188,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (
 			}
 		}
 	}
-	if key != "" {
+	if signkey != "" {
 		signUrlQuery := urlObj.Query()
 		signUrlQuery.Del(prefix + SIGN_STRING)
 		urlObj.RawQuery = signUrlQuery.Encode()
@@ -191,7 +200,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (
 		if err != nil {
 			return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
 		}
-		mac := hmac.New(sha256.New, []byte(key))
+		mac := hmac.New(sha256.New, []byte(signkey))
 		mac.Write([]byte(signUrl))
 		expectedMAC := mac.Sum(nil)
 		if !hmac.Equal(messageMAC, expectedMAC) {
@@ -287,4 +296,17 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, key string) (
 		}
 	}
 	return res, err
+}
+
+var secretRegexp = regexp.MustCompile("__SECRET_[_a-zA-Z][_a-zA-Z0-9]*?__")
+
+// replace all  __SECRET_ABC__ style substrings with SECRET_ABC env value.
+func applySecrets(str string) string {
+	return secretRegexp.ReplaceAllStringFunc(str, func(s string) string {
+		env := s[2 : len(s)-2]
+		if variable, ok := os.LookupEnv(env); ok {
+			return variable
+		}
+		return s
+	})
 }
