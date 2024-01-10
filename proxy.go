@@ -223,13 +223,26 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 	if headers["content-type"] == "" && method == http.MethodPost && body != "" {
 		headers["content-type"] = "application/x-www-form-urlencoded"
 	}
-	forwardHeaders := []string{"Range", "If-Range"}
+	forwardHeaders := []string{"Authorization", "If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
+		"If-Unmodified-Since", "Range"}
 	if fdheaders != "" {
-		forwardHeaders = append(forwardHeaders, strings.Split(fdheaders, ",")...)
+		if fdheaders == "*" {
+			for h := range srReq.Header {
+				forwardHeaders = append(forwardHeaders, h)
+			}
+		} else if fdheaders == "\n" {
+			forwardHeaders = nil
+		} else {
+			forwardHeaders = append(forwardHeaders, strings.Split(fdheaders, ",")...)
+		}
 	}
 	for _, h := range forwardHeaders {
+		h = strings.ToLower(h)
+		if _, ok := headers[h]; ok {
+			continue
+		}
 		if v := srReq.Header.Get(h); v != "" {
-			headers[strings.ToLower(h)] = v
+			headers[h] = v
 		}
 	}
 	urlObj.RawQuery = urlQuery.Encode()
