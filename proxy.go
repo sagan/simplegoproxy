@@ -38,6 +38,7 @@ const (
 	BODY_STRING            = "body"
 	TYPE_STRING            = "type"
 	METHOD_STRING          = "method"
+	SCOPE_STRING           = "scope"
 	SIGN_STRING            = "sign"
 )
 
@@ -118,6 +119,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 	contentType := ""
 	method := http.MethodGet
 	sign := ""
+	var scopes []string
 	for key, values := range urlQuery {
 		// only do secret substitution if request signing is enabled
 		if signkey != "" {
@@ -159,6 +161,12 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 			body = value
 		case TYPE_STRING:
 			contentType = value
+		case SCOPE_STRING:
+			for _, value := range values {
+				if value != "" {
+					scopes = append(scopes, value)
+				}
+			}
 		case SIGN_STRING:
 			sign = value
 		case TIMEOUT_STRING:
@@ -194,7 +202,29 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 		urlObj.RawQuery = signUrlQuery.Encode()
 		signUrl := urlObj.String()
 		if sign == "" {
-			return nil, fmt.Errorf(`sign for url "%s" required`, signUrl)
+			return nil, fmt.Errorf(`sign is required but not found`)
+		}
+		if len(scopes) > 0 {
+			targetUrlQuery := url.Values{}
+			for key, values := range signUrlQuery {
+				if !strings.HasPrefix(key, prefix) {
+					signUrlQuery.Del(key)
+					targetUrlQuery[key] = values
+				}
+			}
+			urlObj.RawQuery = targetUrlQuery.Encode()
+			signUrl = "?" + signUrlQuery.Encode()
+			targetUrl := urlObj.String()
+			matchScopes := false
+			for _, scope := range scopes {
+				if util.MatchUrlPattern(scope, targetUrl) {
+					matchScopes = true
+					break
+				}
+			}
+			if !matchScopes {
+				return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
+			}
 		}
 		messageMAC, err := hex.DecodeString(sign)
 		if err != nil {

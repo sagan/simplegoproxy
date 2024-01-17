@@ -84,7 +84,8 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. A special `*` value can be used to forward ALL request headers. The following headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Authorization`, `Range`, `If-*`; A special "\n" (`%0A`) value supresses this behavior and makes sure no headers would be forwarded.
 - `_sgp_basicauth=user:password` : Set the HTTP Basic Authentication for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below.
-- `_sgp_sign=<value>` : The sign of request canonical url. See below.
+- `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.
+- `_sgp_scope=<value>` : The scope of sign. See below "Scope signing" section.
 
 Modification paramaters are set in Query Variables. All `_sgp_*` parameters are stripped from the target url when Simplegoproxy fetch it. E.g.: the `http://localhost:3000/https://ipcfg.co/json?abc=1&_sgp_cors` entry will actually fetch the `https://ipcfg.co/json?abc=1` target url.
 
@@ -151,3 +152,28 @@ http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c
 If request signing is enabled, all `__SECRET_**__` style substrings in modification parameter value or normal query variable will be replaced with the value of the corresponding `SECRET_**` environment variable, if it exists, when sending request to the target url.
 
 The substitution happens after the request signing verification.
+
+### Scope signing
+
+If any none-empty `_sgp_scope` parameter is provided, the sign is calculated against the whole scope, which is a [Chrome extension style match pattern](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns), instead of against the single target url.
+
+E.g.:
+
+```
+localhost:3000/_sgp_scope=https%3A%2F%2F%2A%2F%2A/ipinfo.io/ip
+```
+
+Here, the `_sgp_scope` is `https://*/*` , which matches all https URLs. The payload ("canonical target url") of scope signing is a `?` character plus all `_sgp_` parameters sorted by key. To calculate it:
+
+```
+simplegoproxy -sign -key abc "?_sgp_scope=https://*/*"
+edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410716bc9d7041e64c715  ?_sgp_scope=https%3A%2F%2F%2A%2F%2A
+```
+
+Then use the following entrypoint url:
+
+```
+curl -i "localhost:3000/_sgp_sign=edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410716bc9d7041e64c715&_sgp_scope=https%3A%2F%2F%2A%2F%2A/ipinfo.io/ip"
+```
+
+The `_sgp_scope` parameter can be set multiple times. The sign can be used to access any target URL which matches with at least one provided scope.

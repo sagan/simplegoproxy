@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -215,4 +216,71 @@ func ParseProxyFromEnv(urlStr string) string {
 		return ""
 	}
 	return proxyUrl.String()
+}
+
+func getUrlPatternParts(pattern string) map[string]string {
+	if pattern == "<all_urls>" {
+		return map[string]string{
+			"scheme": "*",
+			"host":   "*",
+			"path":   "*",
+		}
+	}
+	matchScheme := `(\*|http|https|file|ftp)`
+	matchHost := `(\*|(?:\*\.)?(?:[^/*]+))?`
+	matchPath := `(.*)?`
+	regex := regexp.MustCompile("^" + matchScheme + "://" + matchHost + "(/)" + matchPath + "$")
+	result := regex.FindStringSubmatch(pattern)
+	if result == nil {
+		return nil
+	}
+	return map[string]string{
+		"scheme": result[1],
+		"host":   result[2],
+		"path":   result[4],
+	}
+}
+
+// Create a Chrome extension match pattern style matcher, that test a url against the pattern.
+// Mattern syntax: https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns .
+// Pattern examples: https://*/ , https://*/foo* , https://*.google.com/foo*bar .
+// Adapted from https://github.com/nickclaw/url-match-patterns
+func CreateUrlPatternMatcher(pattern string) func(string) bool {
+	parts := getUrlPatternParts(pattern)
+	if parts == nil {
+		return func(_ string) bool { return false }
+	}
+	str := "^"
+	if parts["scheme"] == "*" {
+		str += "(http|https)"
+	} else {
+		str += parts["scheme"]
+	}
+	str += "://"
+	if parts["host"] == "*" {
+		str += ".*"
+	} else if len(parts["host"]) >= 2 && parts["host"][:2] == "*." {
+		str += `.*`
+		str += `\.`
+		str += regexp.QuoteMeta(parts["host"][2:])
+	} else if parts["host"] != "" {
+		str += parts["host"]
+	}
+	if parts["path"] == "" {
+		str += "/.*"
+	} else if parts["path"] != "" {
+		str += "/"
+		str += regexp.MustCompile(`\\\*`).ReplaceAllString(regexp.QuoteMeta(parts["path"]), ".*")
+	}
+	str += "$"
+	// fmt.Printf("actual pattern: %s\n", str)
+	regex := regexp.MustCompile(str)
+	return func(url string) bool {
+		return regex.MatchString(url)
+	}
+}
+
+func MatchUrlPattern(pattern string, optionalUrl string) bool {
+	matcher := CreateUrlPatternMatcher(pattern)
+	return matcher(optionalUrl)
 }

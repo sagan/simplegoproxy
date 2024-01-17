@@ -73,6 +73,22 @@ func main() {
 				urlQuery.Del(prefix + SIGN_STRING)
 				urlObj.RawQuery = urlQuery.Encode() // query key sorted
 				targetUrl = urlObj.String()
+				if urlQuery[prefix+SCOPE_STRING] != nil {
+					var scopes []string
+					for _, scope := range urlQuery[prefix+SCOPE_STRING] {
+						if scope != "" {
+							scopes = append(scopes, scope)
+						}
+					}
+					if len(scopes) > 0 {
+						for key := range urlQuery {
+							if !strings.HasPrefix(key, prefix) {
+								urlQuery.Del(key)
+							}
+						}
+						targetUrl = "?" + urlQuery.Encode()
+					}
+				}
 			}
 			mac.Write([]byte(targetUrl))
 			messageMac := mac.Sum(nil)
