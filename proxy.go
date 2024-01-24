@@ -25,6 +25,7 @@ const (
 	RESPONSE_HEADER_PREFIX = "resheader_"
 	SUB_PREFIX             = "sub_"
 	CORS_STRING            = "cors"
+	NOCACHE_STRING         = "nocache"
 	NORF_STRING            = "norf"
 	PROXY_STRING           = "proxy"
 	IMPERSONATE_STRING     = "impersonate"
@@ -38,6 +39,7 @@ const (
 	BODY_STRING            = "body"
 	TYPE_STRING            = "type"
 	METHOD_STRING          = "method"
+	REFERER_STRING         = "referer"
 	SCOPE_STRING           = "scope"
 	SIGN_STRING            = "sign"
 )
@@ -108,6 +110,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 	insecure := false
 	forcesub := false
 	nocsp := false
+	nocache := false
 	norf := false // no redirect following
 	proxy := ""
 	impersonate := ""
@@ -120,6 +123,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 	method := http.MethodGet
 	sign := ""
 	var scopes []string
+	var referers []string
 	for key, values := range urlQuery {
 		// only do secret substitution if request signing is enabled
 		if signkey != "" {
@@ -145,6 +149,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 			nocsp = true
 		case NORF_STRING:
 			norf = true
+		case NOCACHE_STRING:
+			nocache = true
 		case PROXY_STRING:
 			proxy = value
 		case IMPERSONATE_STRING:
@@ -167,6 +173,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 					scopes = append(scopes, value)
 				}
 			}
+		case REFERER_STRING:
+			referers = append(referers, values...)
 		case SIGN_STRING:
 			sign = value
 		case TIMEOUT_STRING:
@@ -192,8 +200,27 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 					if h != "" {
 						subs[h] = value
 					}
+				} else {
+					return nil, fmt.Errorf("invalid (non-existent) modification parameter '%s'", key)
 				}
 			}
+		}
+	}
+	if len(referers) > 0 {
+		actualReferer := srReq.Header.Get("Referer")
+		match := false
+		if actualReferer == "" {
+			match = slices.Index(referers, "") != -1
+		} else {
+			for _, referer := range referers {
+				if referer != "" && util.MatchUrlPattern(referer, actualReferer) {
+					match = true
+					break
+				}
+			}
+		}
+		if !match {
+			return nil, fmt.Errorf("invalid referer '%s', allowed referers: %v", actualReferer, referers)
 		}
 	}
 	if signkey != "" {
@@ -293,6 +320,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 	res.Header.Del("Strict-Transport-Security")
 	res.Header.Del("Clear-Site-Data")
 	res.Header.Del("Set-Cookie")
+	res.Header.Set("Referrer-Policy", "no-referrer")
 	if cors {
 		res.Header.Set("Access-Control-Allow-Origin", "*")
 		res.Header.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -306,6 +334,10 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 		res.Header.Del("Content-Security-Policy")
 		res.Header.Del("X-Content-Type-Options")
 		res.Header.Del("X-Frame-Options")
+	}
+	if nocache {
+		res.Header.Set("Cache-Control", "no-store")
+		res.Header.Set("Expires", "0")
 	}
 	for key, value := range responseHeaders {
 		if value != "" {

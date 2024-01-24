@@ -71,6 +71,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_nocsp` : (Value ignored) Remove the [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP) (CSP) headers from original response.
 - `_sgp_insecure` : (Value ignored) Ignore any TLS cert error in http request.
 - `_sgp_norf` : (Value ignored) Do not follow redirects.
+- `_sgp_nocache` : (Value ignored) Add the no-cache headers to original response.
 - `_sgp_proxy=socks5://1.2.3.4:1080` : Set the proxy for the http request.
 - `_sgp_timeout=5` : Set the timeout for the http request (seconds).
 - `_sgp_method=GET` : Set the method for the http request. Default to `GET`.
@@ -83,9 +84,10 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. A special `*` value can be used to forward ALL request headers. The following headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Authorization`, `Range`, `If-*`; A special "\n" (`%0A`) value supresses this behavior and makes sure no headers would be forwarded.
 - `_sgp_basicauth=user:password` : Set the HTTP Basic Authentication for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
-- `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below.
+- `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below "Impersonate the Browser" section.
 - `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.
-- `_sgp_scope=<value>` : The scope of sign. See below "Scope signing" section.
+- `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
+- `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 
 Modification paramaters are set in Query Variables. All `_sgp_*` parameters are stripped from the target url when Simplegoproxy fetch it. E.g.: the `http://localhost:3000/https://ipcfg.co/json?abc=1&_sgp_cors` entry will actually fetch the `https://ipcfg.co/json?abc=1` target url.
 
@@ -147,11 +149,11 @@ http://localhost:3000/_sgp_cors&_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8
 http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors
 ```
 
-### Secret substitution
+### Secret substitutions
 
 If request signing is enabled, all `__SECRET_**__` style substrings in modification parameter value or normal query variable will be replaced with the value of the corresponding `SECRET_**` environment variable, if it exists, when sending request to the target url.
 
-The substitution happens after the request signing verification.
+The substitutions occur after the request signing verification.
 
 ### Scope signing
 
@@ -177,3 +179,11 @@ curl -i "localhost:3000/_sgp_sign=edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410
 ```
 
 The `_sgp_scope` parameter can be set multiple times. The sign can be used to access any target URL which matches with at least one provided scope.
+
+### Referer restrictions
+
+If any `_sgp_referer` parameter is provided. Simplegoproxy will validate the `Referer` header of the request to the entrypoint url and only allow theses requests which referer match with at lease one provided `_sgp_referer` value.
+
+The format of `_sgp_referer` should be a Chrome extension style match pattern (same as `_sgp_scope`). Additionaly, an empty value matches with the "Direct" request, in which case no `Referer` header is present.
+
+Referer restrictions works even if request signing is not enabled.
