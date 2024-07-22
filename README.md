@@ -134,8 +134,10 @@ To calculate the `_sgp_sign` value of a target url, run `simplegoproxy` with `-s
 
 ```
 #simplegoproxy -sign -key abc "https://ipinfo.io/ip?_sgp_cors"
-e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef  https://ipinfo.io/ip?_sgp_cors=
+https://ipinfo.io/ip?_sgp_cors=  e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef
 ```
+
+It outputs the canonical url of the request along with calculated sign.
 
 Then use the following entrypoint url :
 
@@ -147,6 +149,13 @@ http://localhost:3000/_sgp_cors&_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8
 
 # or
 http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors
+```
+
+If you pass a `-publicurl http://localhost:3000` flag when invoking the above command, it outputs the final entry url diretly:
+
+```
+simplegoproxy -sign -key abc -publicurl "http://localhost:3000" "https://ipinfo.io/ip?_sgp_cors"
+https://ipinfo.io/ip?_sgp_cors=  http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors=
 ```
 
 ### Secret substitutions
@@ -168,8 +177,8 @@ localhost:3000/_sgp_scope=https%3A%2F%2F%2A%2F%2A/ipinfo.io/ip
 Here, the `_sgp_scope` is `https://*/*` , which matches all https URLs. The payload ("canonical target url") of scope signing is a `?` character plus all `_sgp_` parameters sorted by key. To calculate it:
 
 ```
-simplegoproxy -sign -key abc "?_sgp_scope=https://*/*"
-edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410716bc9d7041e64c715  ?_sgp_scope=https%3A%2F%2F%2A%2F%2A
+simplegoproxy -sign -key abc "?_sgp_scope=https://*/\_"
+edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410716bc9d7041e64c715 ?_sgp_scope=https%3A%2F%2F%2A%2F%2A
 ```
 
 Then use the following entrypoint url:

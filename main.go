@@ -17,17 +17,21 @@ import (
 )
 
 var (
-	port     int
-	doSign   bool
-	rootpath string
-	prefix   string
-	key      string
+	port      int
+	doSign    bool
+	rootpath  string
+	prefix    string
+	key       string
+	publicUrl string
 )
 
 func main() {
 	flag.IntVar(&port, "port", 3000, "Http listening port")
 	flag.BoolVar(&doSign, "sign", false, `Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)`)
 	flag.StringVar(&rootpath, "rootpath", "/", "Root path (with leading and trailing slash)")
+	flag.StringVar(&publicUrl, "publicurl", "",
+		`Public url of this service. Used with "-sign". E.g. "https://sgp.example.com/". `+
+			`If set, will output the full generated access url instead of sign`)
 	flag.StringVar(&prefix, "prefix", "_sgp_", "Prefix of settings in query parameters")
 	flag.StringVar(&key, "key", "", "The sign key. If set, all requests must be signed using HMAC(key, 'sha-256', payload=url), providing calculated MAC (hex string) in _sgp_sign")
 	flag.Parse()
@@ -91,8 +95,13 @@ func main() {
 				}
 			}
 			mac.Write([]byte(targetUrl))
-			messageMac := mac.Sum(nil)
-			fmt.Printf("%s  %s\n", hex.EncodeToString(messageMac), targetUrl)
+			sign := hex.EncodeToString(mac.Sum(nil))
+			if publicUrl != "" {
+				accessUrl := strings.TrimSuffix(publicUrl, "/") + "/_sgp_sign=" + sign + "/" + targetUrl
+				fmt.Printf("%s  %s\n", targetUrl, accessUrl)
+			} else {
+				fmt.Printf("%s  %s\n", targetUrl, sign)
+			}
 			mac.Reset()
 		}
 		return
