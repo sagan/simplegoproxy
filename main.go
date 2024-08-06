@@ -107,7 +107,8 @@ func main() {
 		return
 	}
 
-	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s, key=%s\n", version.Version, port, rootpath, key)
+	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s, prefix=%s, key=%s\n",
+		version.Version, port, rootpath, prefix, key)
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
 	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(TEXTUAL_MIMES, ", "))
 

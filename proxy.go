@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -16,6 +17,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/vincent-petithory/dataurl"
 
 	"github.com/sagan/simplegoproxy/util"
 )
@@ -53,42 +56,64 @@ var (
 	}
 )
 
+func sendError(w http.ResponseWriter, msg string, args ...any) {
+	w.WriteHeader(500)
+	w.Write([]byte(fmt.Sprintf(msg, args...)))
+}
+
 func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string) {
 	defer r.Body.Close()
 	targetUrl := r.URL.EscapedPath()
-	modparams := ""
+	var modparams url.Values
 	// accept "_sgp_a=1/https://ipcfg.io/json" style request url
 	if strings.HasPrefix(targetUrl, prefix) {
 		index := strings.Index(targetUrl, "/")
 		if index == -1 {
-			w.WriteHeader(400)
-			w.Write([]byte("Invalid url"))
+			sendError(w, "Invalid url")
 			return
 		}
-		modparams = targetUrl[:index]
+		modparamsStr := targetUrl[:index]
 		targetUrl = targetUrl[index+1:]
+		var err error
+		modparams, err = url.ParseQuery(modparamsStr)
+		if err != nil {
+			sendError(w, "Failed to parse modparams %s: %v", modparamsStr, err)
+			return
+		}
 	}
 	targetUrlObj, err := url.Parse(targetUrl)
 	if err != nil {
-		w.WriteHeader(400)
-		w.Write([]byte(fmt.Sprintf("Failed to parse url %s: %v", targetUrl, err)))
+		sendError(w, "Failed to parse url %s: %v", targetUrl, err)
 		return
 	}
 	if targetUrlObj.Scheme == "" {
 		targetUrlObj.Scheme = "https"
 	}
-	if targetUrlObj.Host != "" && targetUrlObj.Path == "" {
-		targetUrlObj.Path = "/"
+	queryParams := url.Values{}
+	if targetUrlObj.Scheme != "data" {
+		if targetUrlObj.Host != "" && targetUrlObj.Path == "" {
+			targetUrlObj.Path = "/"
+		}
+		targetUrlQuery := targetUrlObj.Query()
+		for key, values := range r.URL.Query() {
+			if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {
+				queryParams[key[len(prefix):]] = values
+			} else {
+				targetUrlQuery[key] = values
+			}
+		}
+		targetUrlObj.RawQuery = targetUrlQuery.Encode()
 	}
-	targetUrlObj.RawQuery = r.URL.RawQuery
-	if targetUrlObj.RawQuery != "" && modparams != "" {
-		targetUrlObj.RawQuery += "&"
+	for key, values := range modparams {
+		if !strings.HasPrefix(key, prefix) || len(key) <= len(prefix) {
+			sendError(w, "Invalid modparam %q", key)
+			return
+		}
+		queryParams[key[len(prefix):]] = values
 	}
-	targetUrlObj.RawQuery += modparams
-	response, err := FetchUrl(targetUrlObj, r, prefix, key)
+	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key)
 	if err != nil {
-		w.WriteHeader(500)
-		w.Write([]byte(fmt.Sprintf("Failed to fetch url: %v", err)))
+		sendError(w, "Failed to fetch url: %v", err)
 		return
 	}
 	defer response.Body.Close()
@@ -101,8 +126,8 @@ func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string
 	io.Copy(w, response.Body)
 }
 
-func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey string) (*http.Response, error) {
-	urlQuery := urlObj.Query()
+func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
+	prefix, signkey string) (*http.Response, error) {
 	headers := map[string]string{}
 	responseHeaders := map[string]string{}
 	subs := map[string]string{}
@@ -124,20 +149,11 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 	sign := ""
 	var scopes []string
 	var referers []string
-	for key, values := range urlQuery {
-		// only do secret substitution if request signing is enabled
-		if signkey != "" {
-			for i := range values {
-				values[i] = applySecrets(values[i])
-			}
-			urlQuery[key] = values
-		}
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		urlQuery.Del(key)
-		key = key[len(prefix):]
+	for key, values := range queryParams {
 		value := values[0]
+		if signkey != "" {
+			value = applySecrets(value)
+		}
 		switch key {
 		case CORS_STRING:
 			cors = true
@@ -223,100 +239,137 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 			return nil, fmt.Errorf("invalid referer '%s', allowed referers: %v", actualReferer, referers)
 		}
 	}
-	if signkey != "" {
-		signUrlQuery := urlObj.Query()
-		signUrlQuery.Del(prefix + SIGN_STRING)
-		urlObj.RawQuery = signUrlQuery.Encode()
-		signUrl := urlObj.String()
-		if sign == "" {
-			return nil, fmt.Errorf(`sign is required but not found`)
-		}
-		if len(scopes) > 0 {
-			targetUrlQuery := url.Values{}
-			for key, values := range signUrlQuery {
-				if !strings.HasPrefix(key, prefix) {
-					signUrlQuery.Del(key)
-					targetUrlQuery[key] = values
+
+	if urlObj.Scheme != "data" {
+		if signkey != "" {
+			signUrlQuery := urlObj.Query()
+			for key, values := range queryParams {
+				if key != SIGN_STRING {
+					signUrlQuery[prefix+key] = values
 				}
 			}
-			urlObj.RawQuery = targetUrlQuery.Encode()
-			signUrl = "?" + signUrlQuery.Encode()
-			targetUrl := urlObj.String()
-			matchScopes := false
-			for _, scope := range scopes {
-				if util.MatchUrlPattern(scope, targetUrl) {
-					matchScopes = true
-					break
+			urlObj.RawQuery = signUrlQuery.Encode()
+			signUrl := urlObj.String()
+			if sign == "" {
+				return nil, fmt.Errorf(`sign is required but not found`)
+			}
+			if len(scopes) > 0 {
+				targetUrlQuery := url.Values{}
+				for key, values := range signUrlQuery {
+					if !strings.HasPrefix(key, prefix) {
+						signUrlQuery.Del(key)
+						targetUrlQuery[key] = values
+					}
+				}
+				urlObj.RawQuery = targetUrlQuery.Encode()
+				signUrl = "?" + signUrlQuery.Encode()
+				targetUrl := urlObj.String()
+				matchScopes := false
+				for _, scope := range scopes {
+					if util.MatchUrlPattern(scope, targetUrl) {
+						matchScopes = true
+						break
+					}
+				}
+				if !matchScopes {
+					return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
 				}
 			}
-			if !matchScopes {
-				return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
+			messageMAC, err := hex.DecodeString(sign)
+			if err != nil {
+				return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
+			}
+			mac := hmac.New(sha256.New, []byte(signkey))
+			mac.Write([]byte(signUrl))
+			expectedMAC := mac.Sum(nil)
+			if !hmac.Equal(messageMAC, expectedMAC) {
+				return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
 			}
 		}
-		messageMAC, err := hex.DecodeString(sign)
-		if err != nil {
-			return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
+		if urlObj.User != nil {
+			basicauth = urlObj.User.String()
+			urlObj.User = nil
 		}
-		mac := hmac.New(sha256.New, []byte(signkey))
-		mac.Write([]byte(signUrl))
-		expectedMAC := mac.Sum(nil)
-		if !hmac.Equal(messageMAC, expectedMAC) {
-			return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
+		if cookie != "" {
+			headers["cookie"] = cookie
 		}
-	}
-	if urlObj.User != nil {
-		basicauth = urlObj.User.String()
-		urlObj.User = nil
-	}
-	if cookie != "" {
-		headers["cookie"] = cookie
-	}
-	if basicauth != "" {
-		headers["authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicauth))
-	}
-	if contentType != "" {
-		headers["content-type"] = contentType
-	}
-	if headers["content-type"] == "" && method == http.MethodPost && body != "" {
-		headers["content-type"] = "application/x-www-form-urlencoded"
-	}
-	forwardHeaders := []string{"Authorization", "If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
-		"If-Unmodified-Since", "Range"}
-	if fdheaders != "" {
-		if fdheaders == "*" {
-			for h := range srReq.Header {
-				forwardHeaders = append(forwardHeaders, h)
+		if basicauth != "" {
+			headers["authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicauth))
+		}
+		if contentType != "" {
+			headers["content-type"] = contentType
+		}
+		if headers["content-type"] == "" && method == http.MethodPost && body != "" {
+			headers["content-type"] = "application/x-www-form-urlencoded"
+		}
+		forwardHeaders := []string{"Authorization", "If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
+			"If-Unmodified-Since", "Range"}
+		if fdheaders != "" {
+			if fdheaders == "*" {
+				for h := range srReq.Header {
+					forwardHeaders = append(forwardHeaders, h)
+				}
+			} else if fdheaders == "\n" {
+				forwardHeaders = nil
+			} else {
+				forwardHeaders = append(forwardHeaders, strings.Split(fdheaders, ",")...)
 			}
-		} else if fdheaders == "\n" {
-			forwardHeaders = nil
-		} else {
-			forwardHeaders = append(forwardHeaders, strings.Split(fdheaders, ",")...)
+		}
+		for _, h := range forwardHeaders {
+			h = strings.ToLower(h)
+			if _, ok := headers[h]; ok {
+				continue
+			}
+			if v := srReq.Header.Get(h); v != "" {
+				headers[h] = v
+			}
+		}
+
+		if signkey != "" {
+			// only do secret substitution if request signing is enabled
+			urlQuery := urlObj.Query()
+			for key, values := range urlQuery {
+				for i := range values {
+					values[i] = applySecrets(values[i])
+				}
+				urlQuery[key] = values
+			}
+			urlObj.RawQuery = urlQuery.Encode()
 		}
 	}
-	for _, h := range forwardHeaders {
-		h = strings.ToLower(h)
-		if _, ok := headers[h]; ok {
-			continue
-		}
-		if v := srReq.Header.Get(h); v != "" {
-			headers[h] = v
-		}
-	}
-	urlObj.RawQuery = urlQuery.Encode()
+
 	urlStr := urlObj.String()
-	log.Printf("Fetch: url=%s", urlStr)
-	var reqBody io.Reader
-	if body != "" {
-		reqBody = strings.NewReader(body)
+	log.Printf("Fetch: url=%s, params=%v", urlStr, queryParams)
+	var res *http.Response
+	if urlObj.Scheme == "data" {
+		// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs
+		dataURL, err := dataurl.DecodeString(urlStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid data url: %v", err)
+		}
+		contentType := dataURL.ContentType()
+		res = &http.Response{
+			StatusCode: 200,
+			Header: http.Header{
+				"Content-Type": []string{contentType},
+			},
+			Body: io.NopCloser(bytes.NewReader(dataURL.Data)),
+		}
+	} else {
+		var reqBody io.Reader
+		if body != "" {
+			reqBody = strings.NewReader(body)
+		}
+		req, err := http.NewRequest(method, urlStr, reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("invalid http request: %v", err)
+		}
+		res, err = util.FetchUrl(req, impersonate, insecure, timeout, proxy, norf, headers)
+		if err != nil {
+			return res, err
+		}
 	}
-	req, err := http.NewRequest(method, urlStr, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("invalid http request: %v", err)
-	}
-	res, err := util.FetchUrl(req, impersonate, insecure, timeout, proxy, norf, headers)
-	if err != nil {
-		return res, err
-	}
+
 	res.Header.Del("Strict-Transport-Security")
 	res.Header.Del("Clear-Site-Data")
 	res.Header.Del("Set-Cookie")
@@ -370,7 +423,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, prefix string, signkey strin
 			}
 		}
 	}
-	return res, err
+	return res, nil
 }
 
 var secretRegexp = regexp.MustCompile("__SECRET_[_a-zA-Z][_a-zA-Z0-9]*?__")
