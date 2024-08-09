@@ -26,10 +26,16 @@ Command-line flag arguments:
 ```
   -key string
         The sign key. If set, all requests must be signed using HMAC(key, 'sha-256', payload=url), providing calculated MAC (hex string) in _sgp_sign
+  -keytype string
+        The sign keytype. Used with "-sign"
+  -keytypebl string
+        Comma-separated list of blacklisted keytypes
   -port int
         Http listening port (default 3000)
   -prefix string
         Prefix of settings in query parameters (default "_sgp_")
+  -publicurl string
+        Public url of this service. Used with "-sign". E.g. "https://sgp.example.com/". If set, will output the full generated entrypoint url instead of sign
   -rootpath string
         Root path (with leading and trailing slash) (default "/")
   -sign
@@ -86,8 +92,11 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_basicauth=user:password` : Set the HTTP Basic Authentication for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below "Impersonate the Browser" section.
 - `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.
+- `_sgp_keytype` : The sign key type. See below "Signing key type" section.
 - `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
+- `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
+- `_sgp_validbefore=<value>`, `_sgp_validafter=<value>` : If set, the entrypoint url can only be used before or after this time accordingly. Value can be any of below time formats: `2006-01-02`, `2006-01-02T15:04:05` `2006-01-02T15:04:05-07:00`, `2006-01-02T15:04:05Z`. All but the last format are parsed in local timezone. The last one are parsed as UTC time. Note to enforce these restrictions, "Request signing" must be enabled.
 
 Modification paramaters are set in Query Variables. All `_sgp_*` parameters are stripped from the target url when Simplegoproxy fetch it. E.g.: the `http://localhost:3000/https://ipcfg.co/json?abc=1&_sgp_cors` entry will actually fetch the `https://ipcfg.co/json?abc=1` target url.
 
@@ -164,6 +173,32 @@ If request signing is enabled, all `__SECRET_**__` style substrings in modificat
 
 The substitutions occur after the request signing verification.
 
+### Signing key type
+
+It's possible to provide a optional "key type" value whening signing a url. The "key type" value will be appended to the "key" to derive the effective actual HMAC key.
+
+To sign a url, set a `-keytype string` flag:
+
+```
+simplegoproxy -key abc -keytype one -sign -publicurl http://localhost:3000 ipinfo.io
+```
+
+Output:
+
+```
+https://ipinfo.io/  http://localhost:3000/_sgp_keytype=one&_sgp_sign=94bb9904ac8975e1dc3617ca49a9ed4481d7db6626859978dddcd29c3999d3f0/https://ipinfo.io/
+```
+
+The generated entrypoint url will have the `_sgp_keytype` parameter with same value.
+
+The design purpose of "key type" is that, you can selectively "revoke" the entrypoint urls of some "key type(s)" without invalidating other urls. To do this, set the `-keytypebl string` flag to the comma-separated blacklist of revoked key types:
+
+```
+simplegoproxy -key abc -keytypebl one,two,three
+```
+
+Without "key type", a signed url can only be revoked by changing the "key", which will invalidate all previous generated entrypoint urls.
+
 ### Scope signing
 
 If any none-empty `_sgp_scope` parameter is provided, the sign is calculated against the whole scope, which is a [Chrome extension style match pattern](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns), instead of against the single target url.
@@ -196,3 +231,7 @@ If any `_sgp_referer` parameter is provided. Simplegoproxy will validate the `Re
 The format of `_sgp_referer` should be a Chrome extension style match pattern (same as `_sgp_scope`). Additionaly, an empty value matches with the "Direct" request, in which case no `Referer` header is present.
 
 Referer restrictions works even if request signing is not enabled.
+
+### Origin restrictions
+
+It works in the same way as the above "Referer restrictions" feature except that the parameter name is `_sgp_origin` and is verified against the `Origin` request header.

@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"bytes"
@@ -17,9 +17,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vincent-petithory/dataurl"
 
+	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/util"
 )
 
@@ -43,8 +45,12 @@ const (
 	TYPE_STRING            = "type"
 	METHOD_STRING          = "method"
 	REFERER_STRING         = "referer"
+	ORIGIN_STRING          = "origin"
 	SCOPE_STRING           = "scope"
 	SIGN_STRING            = "sign"
+	KEYTYPE_STRING         = "keytype"
+	VALIDBEFORE_STRING     = "validbefore"
+	VALIDAFTER_STRING      = "validafter"
 )
 
 var (
@@ -61,7 +67,8 @@ func sendError(w http.ResponseWriter, msg string, args ...any) {
 	w.Write([]byte(fmt.Sprintf(msg, args...)))
 }
 
-func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string) {
+func ProxyFunc(w http.ResponseWriter, r *http.Request,
+	prefix string, key string, keytypeBlacklist []string, doLog bool) {
 	defer r.Body.Close()
 	targetUrl := r.URL.EscapedPath()
 	var modparams url.Values
@@ -111,7 +118,10 @@ func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string
 		}
 		queryParams[key[len(prefix):]] = values
 	}
-	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key)
+	if doLog {
+		log.Printf("Fetch: url=%s, params=%v, src=%s", targetUrlObj, queryParams, r.RemoteAddr)
+	}
+	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist)
 	if err != nil {
 		sendError(w, "Failed to fetch url: %v", err)
 		return
@@ -127,7 +137,7 @@ func proxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string
 }
 
 func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
-	prefix, signkey string) (*http.Response, error) {
+	prefix, signkey string, keytypeBlacklist []string) (*http.Response, error) {
 	headers := map[string]string{}
 	responseHeaders := map[string]string{}
 	subs := map[string]string{}
@@ -146,9 +156,12 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 	body := ""
 	contentType := ""
 	method := http.MethodGet
+	keytype := ""
 	sign := ""
 	var scopes []string
 	var referers []string
+	var origines []string
+	now := time.Now().Unix()
 	for key, values := range queryParams {
 		value := values[0]
 		if signkey != "" {
@@ -183,6 +196,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			body = value
 		case TYPE_STRING:
 			contentType = value
+		case KEYTYPE_STRING:
+			keytype = value
 		case SCOPE_STRING:
 			for _, value := range values {
 				if value != "" {
@@ -191,6 +206,20 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			}
 		case REFERER_STRING:
 			referers = append(referers, values...)
+		case ORIGIN_STRING:
+			origines = append(origines, values...)
+		case VALIDBEFORE_STRING:
+			if validbefore, err := util.ParseLocalDateTime(value); err != nil {
+				return nil, fmt.Errorf("invalid validbefore: %v", err)
+			} else if now > validbefore {
+				return nil, fmt.Errorf("url expired")
+			}
+		case VALIDAFTER_STRING:
+			if validafter, err := util.ParseLocalDateTime(value); err != nil {
+				return nil, fmt.Errorf("invalid validafter: %v", err)
+			} else if now < validafter {
+				return nil, fmt.Errorf("url doesn't take effect yet")
+			}
 		case SIGN_STRING:
 			sign = value
 		case TIMEOUT_STRING:
@@ -222,29 +251,18 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			}
 		}
 	}
-	if len(referers) > 0 {
-		actualReferer := srReq.Header.Get("Referer")
-		match := false
-		if actualReferer == "" {
-			match = slices.Index(referers, "") != -1
-		} else {
-			for _, referer := range referers {
-				if referer != "" && util.MatchUrlPattern(referer, actualReferer) {
-					match = true
-					break
-				}
-			}
-		}
-		if !match {
-			return nil, fmt.Errorf("invalid referer '%s', allowed referers: %v", actualReferer, referers)
-		}
+	if len(referers) > 0 && !util.MatchUrlPatterns(referers, srReq.Header.Get("Referer"), true) {
+		return nil, fmt.Errorf("invalid referer '%s', allowed referers: %v", srReq.Header.Get("Referer"), referers)
+	}
+	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srReq.Header.Get("Origin"), true) {
+		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srReq.Header.Get("Origin"), origines)
 	}
 
 	if urlObj.Scheme != "data" {
 		if signkey != "" {
 			signUrlQuery := urlObj.Query()
 			for key, values := range queryParams {
-				if key != SIGN_STRING {
+				if key != SIGN_STRING && key != KEYTYPE_STRING {
 					signUrlQuery[prefix+key] = values
 				}
 			}
@@ -263,23 +281,20 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 				}
 				urlObj.RawQuery = targetUrlQuery.Encode()
 				signUrl = "?" + signUrlQuery.Encode()
-				targetUrl := urlObj.String()
-				matchScopes := false
-				for _, scope := range scopes {
-					if util.MatchUrlPattern(scope, targetUrl) {
-						matchScopes = true
-						break
-					}
-				}
-				if !matchScopes {
+				if targetUrl := urlObj.String(); !util.MatchUrlPatterns(scopes, targetUrl, false) {
 					return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
+				}
+			}
+			if keytype != "" {
+				if slices.Contains(keytypeBlacklist, keytype) {
+					return nil, fmt.Errorf("keytype %q is revoked", keytype)
 				}
 			}
 			messageMAC, err := hex.DecodeString(sign)
 			if err != nil {
 				return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
 			}
-			mac := hmac.New(sha256.New, []byte(signkey))
+			mac := hmac.New(sha256.New, []byte(Realkey(signkey, keytype)))
 			mac.Write([]byte(signUrl))
 			expectedMAC := mac.Sum(nil)
 			if !hmac.Equal(messageMAC, expectedMAC) {
@@ -339,7 +354,6 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 	}
 
 	urlStr := urlObj.String()
-	log.Printf("Fetch: url=%s, params=%v", urlStr, queryParams)
 	var res *http.Response
 	if urlObj.Scheme == "data" {
 		// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs
@@ -437,4 +451,64 @@ func applySecrets(str string) string {
 		}
 		return s
 	})
+}
+
+func Realkey(key, keytype string) string {
+	if keytype != "" {
+		key += "." + keytype
+	}
+	return key
+}
+
+func Generate(targetUrl, key, keytype, publicurl, prefix string) (canonicalurl string, sign, entryurl string) {
+	urlObj, err := url.Parse(targetUrl)
+	canonicalurl = targetUrl
+	// use the full canonical url
+	if err == nil {
+		if urlObj.Scheme == "" {
+			urlObj.Scheme = "https"
+		}
+		if urlObj.Host != "" && urlObj.Path == "" {
+			urlObj.Path = "/"
+		} else if urlObj.Host == "" && !strings.Contains(urlObj.Path, "/") {
+			// "ipinfo.io" => schema=, host=, path=ipinfo.io . So add a root path.
+			urlObj.Path += "/"
+		}
+		urlQuery := urlObj.Query()
+		urlQuery.Del(flags.Prefix + SIGN_STRING)
+		urlQuery.Del(flags.Prefix + KEYTYPE_STRING)
+		urlObj.RawQuery = urlQuery.Encode() // query key sorted
+		canonicalurl = urlObj.String()
+		if urlQuery[flags.Prefix+SCOPE_STRING] != nil {
+			var scopes []string
+			for _, scope := range urlQuery[flags.Prefix+SCOPE_STRING] {
+				if scope != "" {
+					scopes = append(scopes, scope)
+				}
+			}
+			if len(scopes) > 0 {
+				for key := range urlQuery {
+					if !strings.HasPrefix(key, flags.Prefix) {
+						urlQuery.Del(key)
+					}
+				}
+				canonicalurl = "?" + urlQuery.Encode()
+			}
+		}
+	}
+	if key != "" {
+		mac := hmac.New(sha256.New, []byte(Realkey(key, keytype)))
+		mac.Write([]byte(canonicalurl))
+		sign = hex.EncodeToString(mac.Sum(nil))
+	}
+	if publicurl != "" {
+		if keytype != "" {
+			entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+				prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
+		} else {
+			entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+				prefix, SIGN_STRING, sign, canonicalurl)
+		}
+	}
+	return
 }

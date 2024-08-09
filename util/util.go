@@ -2,7 +2,9 @@ package util
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -307,4 +309,61 @@ func CreateUrlPatternMatcher(pattern string) func(string) bool {
 func MatchUrlPattern(pattern string, optionalUrl string) bool {
 	matcher := CreateUrlPatternMatcher(pattern)
 	return matcher(optionalUrl)
+}
+
+func MatchUrlPatterns(patterns []string, url string, matchempty bool) bool {
+	if url == "" {
+		if matchempty && slices.Index(patterns, "") != -1 {
+			return true
+		}
+	} else {
+		for _, pattern := range patterns {
+			if pattern != "" && MatchUrlPattern(pattern, url) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var commaSeperatorRegexp = regexp.MustCompile(`,\s*`)
+
+// split a csv like line to values. "a, b, c" => [a,b,c].
+// If str is empty string, return nil.
+func SplitCsv(str string) []string {
+	if str == "" {
+		return nil
+	}
+	return commaSeperatorRegexp.Split(str, -1)
+}
+
+func ParseLocalDateTime(str string) (int64, error) {
+	if t, error := time.Parse("2006-01-02T15:04:05Z", str); error == nil {
+		return t.Unix(), nil
+	}
+	formats := []string{
+		"2006-01-02",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04:05-07:00",
+	}
+	for _, format := range formats {
+		if t, error := time.ParseInLocation(format, str, time.Local); error == nil {
+			return t.Unix(), nil
+		}
+	}
+	return 0, fmt.Errorf("invalid date str")
+}
+
+func PrintJson(output io.Writer, value any) error {
+	bytes, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal json: %w", err)
+	}
+	fmt.Fprintln(output, string(bytes))
+	return nil
+}
+
+// Return t unconditionally.
+func First[T any](t T, args ...any) T {
+	return t
 }
