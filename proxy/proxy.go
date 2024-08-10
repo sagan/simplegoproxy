@@ -317,7 +317,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 		if headers["content-type"] == "" && method == http.MethodPost && body != "" {
 			headers["content-type"] = "application/x-www-form-urlencoded"
 		}
-		forwardHeaders := []string{"Authorization", "If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
+		forwardHeaders := []string{"If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
 			"If-Unmodified-Since", "Range"}
 		if fdheaders != "" {
 			if fdheaders == "*" {
@@ -390,8 +390,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 	res.Header.Set("Referrer-Policy", "no-referrer")
 	if cors {
 		res.Header.Set("Access-Control-Allow-Origin", "*")
-		res.Header.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		res.Header.Set("Access-Control-Allow-Credentials", "true")
+		res.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		// res.Header.Set("Access-Control-Allow-Credentials", "true") // it's security vulerable as sgp has admin API now.
 		if h := srReq.Header.Get("Access-Control-Request-Headers"); h != "" {
 			res.Header.Set("Access-Control-Allow-Headers", h)
 		}
@@ -500,15 +500,17 @@ func Generate(targetUrl, key, keytype, publicurl, prefix string) (canonicalurl s
 		mac := hmac.New(sha256.New, []byte(Realkey(key, keytype)))
 		mac.Write([]byte(canonicalurl))
 		sign = hex.EncodeToString(mac.Sum(nil))
-	}
-	if publicurl != "" {
-		if keytype != "" {
-			entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
-				prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
-		} else {
-			entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
-				prefix, SIGN_STRING, sign, canonicalurl)
+		if publicurl != "" {
+			if keytype != "" {
+				entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+					prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
+			} else {
+				entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+					prefix, SIGN_STRING, sign, canonicalurl)
+			}
 		}
+	} else {
+		entryurl = fmt.Sprintf("%s/%s", strings.TrimSuffix(publicurl, "/"), canonicalurl)
 	}
 	return
 }

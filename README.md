@@ -24,12 +24,18 @@ docker run --name sgp -p 3000:3000 -d \
 Command-line flag arguments:
 
 ```
+  -cors
+        Set "Access-Control-Allow-Origin: *" header for admin API
   -key string
         The sign key. If set, all requests must be signed using HMAC(key, 'sha-256', payload=url), providing calculated MAC (hex string) in _sgp_sign
   -keytype string
         The sign keytype. Used with "-sign"
   -keytypebl string
         Comma-separated list of blacklisted keytypes
+  -log
+        Log every request urls
+  -pass string
+        Password of admin UI. If not set, the "key" will be used
   -port int
         Http listening port (default 3000)
   -prefix string
@@ -40,6 +46,8 @@ Command-line flag arguments:
         Root path (with leading and trailing slash) (default "/")
   -sign
         Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)
+  -user string
+        Username of admin UI (Admin UI is available at "/admin" path) (default "root")
 ```
 
 All arguments are optional, and can also be set by environment variable with the same name in uppercase, e.g.: "port" flag can also be set using "PORT" env.
@@ -88,7 +96,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_cookie=<value>` : Set request cookie. Equivalent to `_sgp_header_cookie=<value>`.
 - `_sgp_type=<value>` : Set the request content type. Equivalent to `_sgp_header_Content-Type=<value>`. If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
-- `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. A special `*` value can be used to forward ALL request headers. The following headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Authorization`, `Range`, `If-*`; A special "\n" (`%0A`) value supresses this behavior and makes sure no headers would be forwarded.
+- `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. A special `*` value can be used to forward ALL request headers. The following headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`; A special "\n" (`%0A`) value supresses this behavior and makes sure no headers would be forwarded.
 - `_sgp_basicauth=user:password` : Set the HTTP Basic Authentication for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below "Impersonate the Browser" section.
 - `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.
@@ -124,6 +132,10 @@ Simplegoproxy will print the list of supported targets when starting. Currently 
 
 - `chrome120` : Chrome 120 on Windows 11 x64 en-US
 - `firefox121` : Firefox 121 on Windows 11 x64 en-US
+
+### Admin UI
+
+Simplegoproxy provides a http admin UI at `/admin/` path, e.g. `http://localhost:3000/admin/` . The admin UI allow users to generate entrypoint url for a target url and view history records of generated entrypoint urls. All data are stored in the browser local storage.
 
 ## Security tips
 
@@ -166,6 +178,13 @@ If you pass a `-publicurl http://localhost:3000` flag when invoking the above co
 simplegoproxy -sign -key abc -publicurl "http://localhost:3000" "https://ipinfo.io/ip?_sgp_cors"
 https://ipinfo.io/ip?_sgp_cors=  http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors=
 ```
+
+### Admin UI Authorization
+
+If request signing is enabled, the admin UI will require http basic authorization:
+
+- Username: Default is `root`. Can be changed by `-user string` flag.
+- Password: Default use "key" flag as password. Use `-pass string` flag to set standalone password.
 
 ### Secret substitutions
 

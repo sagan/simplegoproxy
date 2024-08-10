@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/proxy"
 	"github.com/sagan/simplegoproxy/util"
+	"github.com/sagan/simplegoproxy/version"
 )
 
 //go:embed dist
@@ -23,16 +25,36 @@ var ApiFuncs = map[string]ApiFunc{
 	"generate": Generate,
 }
 
-var GetHttpHandle = func(rootpath, user, pass string) http.Handler {
+var GetHttpHandle = func() http.Handler {
 	root, _ := fs.Sub(Webfs, "dist")
 	fileServer := http.FileServer(http.FS(root))
 	indexHtml, _ := Webfs.ReadFile("dist/index.html")
-	indexHtml = []byte(strings.ReplaceAll(string(indexHtml), `"/"; //__ROOT__`, fmt.Sprintf(`"%s";`, rootpath)))
+	indexHtmlStr := string(indexHtml)
+	variables := map[string]string{
+		"ROOTPATH": flags.Rootpath,
+		"PREFIX":   flags.Prefix,
+		"ENV":      "production",
+		"VERSION":  version.Version,
+	}
+	variableRegex := regexp.MustCompile(`".*?"; //__([A-Z][_A-Z0-9]*?)__`)
+	indexHtmlStr = variableRegex.ReplaceAllStringFunc(indexHtmlStr, func(s string) string {
+		i := strings.Index(s, "__")
+		j := strings.LastIndex(s, "__")
+		variable := s[i+2 : j]
+		if value, ok := variables[variable]; ok {
+			return fmt.Sprintf(`%q; //%s`, value, s[j+2:])
+		}
+		return s
+	})
+	indexHtml = []byte(indexHtmlStr)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="website"`)
-		if pass != "" {
+		if flags.Cors {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+		if flags.Pass != "" {
 			username, password, ok := r.BasicAuth()
-			if !ok || username != user || password != pass {
+			if !ok || username != flags.User || password != flags.Pass {
 				w.WriteHeader(401)
 				w.Write([]byte("Unauthorized"))
 				return
@@ -78,7 +100,7 @@ func Generate(params url.Values) (data any, err error) {
 	if !params.Has("url") {
 		return nil, fmt.Errorf("invalid parameters")
 	}
-	canonicalurl, sign, entryurl := proxy.Generate(params.Get("url"), flags.Key, flags.Keytype,
+	canonicalurl, sign, entryurl := proxy.Generate(params.Get("url"), flags.Key, params.Get("keytype"),
 		params.Get("publicurl"), flags.Prefix)
 	data = map[string]any{
 		"url":      canonicalurl,

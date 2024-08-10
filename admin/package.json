@@ -10,10 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@rehooks/local-storage": "^2.4.5",
     "normalize.css": "^8.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-helmet": "^6.1.0",
+    "react-hook-form": "^7.52.2",
     "react-router": "^6.26.0",
     "react-router-dom": "^6.26.0"
   },

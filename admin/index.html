@@ -5,11 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Simplegoproxy</title>
     <script>
-      window.__ROOT__ = "/"; //__ROOT__
+      window.__ENV__ = "development"; //__ENV__ ; development|production.
+      window.__ROOTPATH__ = "/"; //__ROOTPATH__ ; root path of sgp url.
+      window.__PREFIX__ = "_sgp_"; //__PREFIX__
+      window.__VERSION__ = "v0.0.0"; //__VERSION__
+      if (window.__ENV__ == "production") {
+        window.__ADMINPATH__ = window.__ROOTPATH__ + "admin/";
+        window.__ROOTURL__ = location.origin + window.__ROOTPATH__;
+        window.__APIURL__ = window.__ADMINPATH__ + "api";
+      } else {
+        window.__ADMINPATH__ = "/";
+        window.__ROOTURL__ = "http://localhost:3000/";
+        window.__APIURL__ = "http://" + location.hostname + ":3000/admin/api";
+      }
+      document.title += " " + window.__VERSION__;
     </script>
   </head>
   <body>
-    <div id="root" class="flex flex-col"></div>
+    <div id="root" class="flex flex-col p-1"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

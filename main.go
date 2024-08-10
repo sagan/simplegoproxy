@@ -76,13 +76,17 @@ func main() {
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.Log)
 	}))
-	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle(flags.Rootpath, flags.User, flags.Pass))
+	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244
 	err := http.ListenAndServe(fmt.Sprintf(":%d", flags.Port), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, adminPath) {
 			adminHandle.ServeHTTP(w, r)
 			return
 		} else if strings.HasPrefix(r.URL.Path, flags.Rootpath) {
+			if r.URL.Path == flags.Rootpath {
+				http.Redirect(w, r, flags.Rootpath+"admin/", http.StatusTemporaryRedirect)
+				return
+			}
 			proxyHandle.ServeHTTP(w, r)
 			return
 		}

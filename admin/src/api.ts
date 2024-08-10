@@ -1,9 +1,13 @@
-let apiUrl = window.__ROOT__ + "admin/api";
-
 interface Generate {
   url: string;
   entryurl: string;
   sign: string;
+}
+
+interface GenerateRequest {
+  url: string;
+  keytype: string;
+  publicurl: string;
 }
 
 export async function fetchApi<T>(params: { [key: string]: string }) {
@@ -17,10 +21,14 @@ export async function fetchApi<T>(params: { [key: string]: string }) {
       data.set(key, value);
     }
   }
-  let res = await fetch(apiUrl + "?" + data.toString(), {
-    method: "GET",
+  let res = await fetch(window.__APIURL__, {
+    method: "POST",
     mode: "cors",
     cache: "no-cache",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: data.toString(),
   });
   if (res.status != 200) {
     throw new Error(`status=${res.status}`);
@@ -29,8 +37,8 @@ export async function fetchApi<T>(params: { [key: string]: string }) {
   return resdata;
 }
 
-export async function fetchGenerate() {
-  return await fetchApi<Generate>({ func: "generate" });
+export async function fetchGenerate(req: GenerateRequest) {
+  return await fetchApi<Generate>({ func: "generate", ...req });
 }
 
-export type { Generate };
+export type { Generate, GenerateRequest };

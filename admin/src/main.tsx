@@ -11,7 +11,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 function App() {
   return (
     <React.StrictMode>
-      <Router basename={window.__ROOT__ + "admin"}>
+      <Router basename={window.__ADMINPATH__}>
         <Routes>
           <Route path="/" element={<Home />}></Route>
         </Routes>

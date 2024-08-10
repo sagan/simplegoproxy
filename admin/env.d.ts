@@ -1,13 +1,8 @@
-declare module "process" {
-  global {
-    namespace NodeJS {
-      interface ProcessEnv {
-        NODE_ENV?: string;
-      }
-    }
-  }
-}
-
 declare interface Window {
-  __ROOT__: string;
+  __PREFIX__: string;
+  __ROOTPATH__: string;
+  __ADMINPATH__: string;
+  __ROOTURL__: string;
+  __APIURL__: string;
+  __VERSION__: string;
 }
