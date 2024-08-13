@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -18,7 +19,10 @@ import (
 	"strings"
 	"time"
 
+	"html/template"
+
 	"github.com/Noooste/azuretls-client"
+	"github.com/sagan/simplegoproxy/constants"
 )
 
 type ImpersonateProfile struct {
@@ -148,16 +152,61 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 		if runtime.GOOS == "windows" && regexp.MustCompile(`^/[a-zA-Z]:\/`).MatchString(localfilepath) {
 			localfilepath = localfilepath[1:]
 		}
+		localfilepath = filepath.Clean(localfilepath)
+		stat, err := os.Stat(localfilepath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to stat file %q: %v", localfilepath, err)
+		}
+		isRoot := filepath.Clean(filepath.Join(localfilepath, "..")) == localfilepath
+		if stat.Mode().IsDir() {
+			tpl, err := template.New("template").Parse(constants.DIR_INDEX_HTML)
+			if err != nil {
+				return nil, fmt.Errorf("failed to compile dir index template: %v", err)
+			}
+			entries, err := os.ReadDir(localfilepath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read dir: %v", err)
+			}
+			files := []map[string]any{}
+			for _, entry := range entries {
+				file := map[string]any{
+					"Name":  entry.Name(),
+					"IsDir": entry.IsDir(),
+					"Time":  int64(0),
+					"Size":  int64(0),
+				}
+				if info, err := entry.Info(); err == nil {
+					file["Time"] = info.ModTime().Unix()
+					if entry.Type().IsRegular() {
+						file["Size"] = info.Size()
+					}
+				}
+				files = append(files, file)
+			}
+			buf := &bytes.Buffer{}
+			err = tpl.Execute(buf, map[string]any{
+				"Dir":    localfilepath,
+				"IsRoot": isRoot,
+				"Files":  files,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to render dir template: %v", err)
+			}
+			res := &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type":   []string{"text/html"},
+					"Content-Length": []string{fmt.Sprint(buf.Len())},
+				},
+				Body: io.NopCloser(buf),
+			}
+			return res, nil
+		}
 		file, err := os.Open(localfilepath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open file %q: %v", localfilepath, err)
 		}
-		stat, err := file.Stat()
-		if err != nil {
-			file.Close()
-			return nil, fmt.Errorf("failed to stat file %q: %v", stat, err)
-		}
-		contentType := mime.TypeByExtension(filepath.Ext(localfilepath))
+		contentType := FileContentType(localfilepath)
 		res := &http.Response{Header: http.Header{}}
 		if req.Header.Get("Range") != "" {
 			rangesFile, err := NewRangesFile(file, contentType, stat.Size(), req.Header.Get("Range"))
@@ -423,4 +472,12 @@ func PrintJson(output io.Writer, value any) error {
 // Return t unconditionally.
 func First[T any](t T, args ...any) T {
 	return t
+}
+
+func FileContentType(path string) string {
+	contentType := mime.TypeByExtension(filepath.Ext(path))
+	if contentType == "" {
+		contentType = constants.DEFAULT_MIME
+	}
+	return contentType
 }

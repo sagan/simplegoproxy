@@ -99,9 +99,6 @@ func NewRangesFile(file *os.File, contentType string, fileSize int64, rangeHeade
 	if err != nil {
 		return nil, err
 	}
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
 	rfb := &RangesFile{file: file, ranges: ranges, boundary: randomBoundary(),
 		contentType: contentType, fileSize: fileSize}
 	return rfb, nil
