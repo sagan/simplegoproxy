@@ -21,7 +21,6 @@ import (
 
 	"github.com/vincent-petithory/dataurl"
 
-	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/util"
 )
 
@@ -68,7 +67,7 @@ func sendError(w http.ResponseWriter, msg string, args ...any) {
 }
 
 func ProxyFunc(w http.ResponseWriter, r *http.Request,
-	prefix string, key string, keytypeBlacklist []string, doLog bool) {
+	prefix string, key string, keytypeBlacklist []string, doLog, enableUnix, enableFile bool) {
 	defer r.Body.Close()
 	targetUrl := r.URL.EscapedPath()
 	var modparams url.Values
@@ -121,6 +120,22 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request,
 	if doLog {
 		log.Printf("Fetch: url=%s, params=%v, src=%s", targetUrlObj, queryParams, r.RemoteAddr)
 	}
+	switch targetUrlObj.Scheme {
+	case "unix":
+		if !enableUnix {
+			sendError(w, "unix domain socket is not enabled")
+			return
+		}
+	case "file":
+		if !enableFile {
+			sendError(w, "file url is not enabled")
+			return
+		}
+	case "http", "https", "data": // do nothing
+	default:
+		sendError(w, "unsupported url schema %q", targetUrlObj.Scheme)
+		return
+	}
 	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist)
 	if err != nil {
 		sendError(w, "Failed to fetch url: %v", err)
@@ -138,7 +153,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request,
 
 func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 	prefix, signkey string, keytypeBlacklist []string) (*http.Response, error) {
-	headers := map[string]string{}
+	header := http.Header{}
 	responseHeaders := map[string]string{}
 	subs := map[string]string{}
 	cors := false
@@ -233,7 +248,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 				if strings.HasPrefix(key, HEADER_PREFIX) {
 					h := key[len(HEADER_PREFIX):]
 					if h != "" {
-						headers[strings.ToLower(h)] = value
+						header.Add(h, value)
 					}
 				} else if strings.HasPrefix(key, RESPONSE_HEADER_PREFIX) {
 					h := key[len(RESPONSE_HEADER_PREFIX):]
@@ -306,16 +321,16 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			urlObj.User = nil
 		}
 		if cookie != "" {
-			headers["cookie"] = cookie
+			header.Set("Cookie", cookie)
 		}
 		if basicauth != "" {
-			headers["authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicauth))
+			header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(basicauth)))
 		}
 		if contentType != "" {
-			headers["content-type"] = contentType
+			header.Set("Content-Type", contentType)
 		}
-		if headers["content-type"] == "" && method == http.MethodPost && body != "" {
-			headers["content-type"] = "application/x-www-form-urlencoded"
+		if header.Get("Content-Type") == "" && method == http.MethodPost && body != "" {
+			header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 		forwardHeaders := []string{"If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
 			"If-Unmodified-Since", "Range"}
@@ -331,13 +346,10 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			}
 		}
 		for _, h := range forwardHeaders {
-			h = strings.ToLower(h)
-			if _, ok := headers[h]; ok {
+			if len(header.Values(h)) > 0 || len(srReq.Header.Values(h)) == 0 {
 				continue
 			}
-			if v := srReq.Header.Get(h); v != "" {
-				headers[h] = v
-			}
+			header[h] = srReq.Header[h]
 		}
 
 		if signkey != "" {
@@ -378,7 +390,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 		if err != nil {
 			return nil, fmt.Errorf("invalid http request: %v", err)
 		}
-		res, err = util.FetchUrl(req, impersonate, insecure, timeout, proxy, norf, headers)
+		req.Header = header
+		res, err = util.FetchUrl(req, impersonate, insecure, timeout, proxy, norf)
 		if err != nil {
 			return res, err
 		}
@@ -475,20 +488,20 @@ func Generate(targetUrl, key, keytype, publicurl, prefix string) (canonicalurl s
 			urlObj.Path += "/"
 		}
 		urlQuery := urlObj.Query()
-		urlQuery.Del(flags.Prefix + SIGN_STRING)
-		urlQuery.Del(flags.Prefix + KEYTYPE_STRING)
+		urlQuery.Del(prefix + SIGN_STRING)
+		urlQuery.Del(prefix + KEYTYPE_STRING)
 		urlObj.RawQuery = urlQuery.Encode() // query key sorted
 		canonicalurl = urlObj.String()
-		if urlQuery[flags.Prefix+SCOPE_STRING] != nil {
+		if urlQuery[prefix+SCOPE_STRING] != nil {
 			var scopes []string
-			for _, scope := range urlQuery[flags.Prefix+SCOPE_STRING] {
+			for _, scope := range urlQuery[prefix+SCOPE_STRING] {
 				if scope != "" {
 					scopes = append(scopes, scope)
 				}
 			}
 			if len(scopes) > 0 {
 				for key := range urlQuery {
-					if !strings.HasPrefix(key, flags.Prefix) {
+					if !strings.HasPrefix(key, prefix) {
 						urlQuery.Del(key)
 					}
 				}

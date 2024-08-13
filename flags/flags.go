@@ -7,6 +7,8 @@ var (
 	Sign                bool
 	Log                 bool
 	Cors                bool
+	Unix                bool
+	File                bool
 	Rootpath            string
 	Prefix              string
 	Key                 string
@@ -21,6 +23,8 @@ var (
 func init() {
 	flag.IntVar(&Port, "port", 3000, "Http listening port")
 	flag.BoolVar(&Log, "log", false, "Log every request urls")
+	flag.BoolVar(&Unix, "enable-unix", false, `Enable unix domain socket url: "unix:///path/to/socket"`)
+	flag.BoolVar(&File, "enable-file", false, `Enable file schema url: "file:///path/to/file"`)
 	flag.BoolVar(&Cors, "cors", false, `Set "Access-Control-Allow-Origin: *" header for admin API`)
 	flag.BoolVar(&Sign, "sign", false, `Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)`)
 	flag.StringVar(&Rootpath, "rootpath", "/", "Root path (with leading and trailing slash)")

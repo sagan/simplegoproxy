@@ -1,14 +1,19 @@
 package util
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -112,17 +117,67 @@ var ImpersonateProfiles = map[string]*ImpersonateProfile{
 	},
 }
 
-func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int, proxy string, norf bool,
-	headers map[string]string) (*http.Response, error) {
+func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
+	proxy string, norf bool) (*http.Response, error) {
+	if req.URL.Scheme == "unix" {
+		// req.URL: "unix:///path/to/socket:resource_url" .
+		// Host is empty and path is a ":" splitted two parts.
+		uncPath, resourceUrl, found := strings.Cut(req.URL.Path, ":")
+		if !found {
+			return nil, fmt.Errorf(`invalid unix domain socket url. format: "unix:///path/to/socket:resource_url"`)
+		}
+		httpc := http.Client{
+			Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", uncPath)
+				},
+			},
+		}
+		resourceUrlObj, err := url.Parse(resourceUrl)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse unix domain socket resource url: %v", err)
+		}
+		dummyUrl := "http://unix/" + resourceUrlObj.Path
+		if req.URL.RawQuery != "" {
+			dummyUrl += "?" + req.URL.RawQuery
+		}
+		return httpc.Get(dummyUrl) // dummy http protocol url prefix
+	} else if req.URL.Scheme == "file" {
+		localfilepath := req.URL.Path
+		// on Windows, strip leading "/" of file url, e.g. "file:///C:/a.txt" (path: "/C:/a.txt").
+		if runtime.GOOS == "windows" && regexp.MustCompile(`^/[a-zA-Z]:\/`).MatchString(localfilepath) {
+			localfilepath = localfilepath[1:]
+		}
+		file, err := os.Open(localfilepath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file %q: %v", localfilepath, err)
+		}
+		stat, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("failed to stat file %q: %v", stat, err)
+		}
+		contentType := mime.TypeByExtension(filepath.Ext(localfilepath))
+		res := &http.Response{Header: http.Header{}}
+		if req.Header.Get("Range") != "" {
+			rangesFile, err := NewRangesFile(file, contentType, stat.Size(), req.Header.Get("Range"))
+			if err != nil {
+				file.Close()
+				return nil, fmt.Errorf("invalid range: %v", err)
+			}
+			rangesFile.SetHeader(res.Header)
+			res.StatusCode = http.StatusPartialContent
+			res.Body = rangesFile
+		} else {
+			res.Header.Set("Content-Type", contentType)
+			res.Header.Set("Content-Length", fmt.Sprint(stat.Size()))
+			res.StatusCode = http.StatusOK
+			res.Body = file
+		}
+		return res, nil
+	}
 	reqUrl := req.URL.String()
 	if impersonate == "" {
-		for key, value := range headers {
-			if value != "" {
-				req.Header.Set(key, value)
-			} else {
-				req.Header.Del(key)
-			}
-		}
 		var httpClient *http.Client
 		if insecure || norf || proxy != "" || timeout > 0 {
 			httpClient = &http.Client{
@@ -186,8 +241,10 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 	effectiveHeaders := [][]string{}
 	headerIndexs := map[string]int{}
 	allHeaders = append(allHeaders, ip.Headers...)
-	for key, value := range headers {
-		allHeaders = append(allHeaders, []string{key, value})
+	for key := range req.Header {
+		for _, value := range req.Header[key] {
+			allHeaders = append(allHeaders, []string{key, value})
+		}
 	}
 	for _, header := range allHeaders {
 		headerLowerCase := strings.ToLower(header[0])
