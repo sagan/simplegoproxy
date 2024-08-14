@@ -8,7 +8,8 @@ import (
 )
 
 // A custom time format, that:
-// When Mar
+// When unmarshal from json, can be parsed from multiple time formats;
+// When marshal into json, serialized to timestamp seconds number.
 type TimestampTime time.Time
 
 var formats = []string{"2006-01-02T15:04:05Z", "2006-01-02T15:04:05-07:00"}
@@ -33,11 +34,9 @@ func (ct TimestampTime) MarshalJSON() ([]byte, error) {
 }
 
 func (ct *TimestampTime) String() string {
-	t := time.Time(*ct)
-	return fmt.Sprintf("%q", t.Format(formats[0]))
+	return fmt.Sprintf("%q", time.Time(*ct).Format(formats[0]))
 }
 
 func (ct *TimestampTime) Format(layout string) string {
-	t := time.Time(*ct)
-	return fmt.Sprintf("%q", t.Format(layout))
+	return time.Time(*ct).Format(layout)
 }

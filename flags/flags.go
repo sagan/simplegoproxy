@@ -11,7 +11,7 @@ var (
 	File                bool
 	Rclone              bool
 	RcloneBinary        string
-	RcloneConf          string
+	RcloneConfig        string
 	Rootpath            string
 	Prefix              string
 	Key                 string
@@ -32,7 +32,7 @@ func init() {
 	flag.BoolVar(&Cors, "cors", false, `Set "Access-Control-Allow-Origin: *" header for admin API`)
 	flag.BoolVar(&Sign, "sign", false, `Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)`)
 	flag.StringVar(&RcloneBinary, "rclone-binary", "rclone", "Rclone binary path")
-	flag.StringVar(&RcloneConf, "rclone-conf", "", "Manually specify rclone config file path")
+	flag.StringVar(&RcloneConfig, "rclone-config", "", "Manually specify rclone config file path")
 	flag.StringVar(&Rootpath, "rootpath", "/", "Root path (with leading and trailing slash)")
 	flag.StringVar(&PublicUrl, "publicurl", "",
 		`Public url of this service. Used with "-sign". E.g. "https://sgp.example.com/". `+

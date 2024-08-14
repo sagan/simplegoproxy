@@ -37,7 +37,7 @@ type NetRequest struct {
 	Proxy        string
 	Norf         bool
 	RcloneBinary string
-	RcloneConf   string
+	RcloneConfig string
 }
 
 type ImpersonateProfile struct {
@@ -378,16 +378,12 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		return nil, fmt.Errorf("rclone remote name is empty")
 	}
 	// req.URL: "rclone://remote/path/to/file"
-	remotePathname := req.URL.Path
-	// rclone use "" (not "/") as canonical root path. But we use "/".
-	if remotePathname == "" {
-		remotePathname = "/"
-	}
+	remotePathname := strings.TrimPrefix(req.URL.Path, "/")
 	remotePath := req.URL.Host + ":" + remotePathname
 
 	statargs := []string{"lsjson", "--stat", remotePath}
-	if netreq.RcloneConf != "" {
-		statargs = append(statargs, "--config", netreq.RcloneConf)
+	if netreq.RcloneConfig != "" {
+		statargs = append(statargs, "--config", netreq.RcloneConfig)
 	}
 	statcmd := exec.Command(rcloneBinary, statargs...)
 	statstr, err := statcmd.Output()
@@ -401,8 +397,8 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 
 	if stat.IsDir {
 		args := []string{"lsjson", remotePath}
-		if netreq.RcloneConf != "" {
-			args = append(args, "--config", netreq.RcloneConf)
+		if netreq.RcloneConfig != "" {
+			args = append(args, "--config", netreq.RcloneConfig)
 		}
 		cmd := exec.Command(rcloneBinary, args...)
 		out, err := cmd.Output()
@@ -445,8 +441,21 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		},
 	}
 	args := []string{"cat", remotePath}
-	if netreq.RcloneConf != "" {
-		args = append(args, "--config", netreq.RcloneConf)
+	if netreq.RcloneConfig != "" {
+		args = append(args, "--config", netreq.RcloneConfig)
+	}
+	for key, values := range req.URL.Query() {
+		if strings.HasPrefix(key, "_") || strings.HasPrefix(key, "$") || strings.HasPrefix(key, ".") {
+			continue
+		}
+		key = "--" + key
+		for _, value := range values {
+			if value != "" {
+				args = append(args, key, value)
+			} else {
+				args = append(args, key)
+			}
+		}
 	}
 	if req.Header.Get("Range") != "" {
 		ranges, err := range_parser.Parse(stat.Size, req.Header.Get("Range"))
@@ -478,23 +487,29 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to exec rclone: %v", err)
 	}
-	var cmderr error
-	var cmddone atomic.Bool
-	go func() {
-		//cmd.Wait will close pipes so do not use them.
-		state, err := cmd.Process.Wait()
-		if err == nil && !state.Success() {
-			cmderr = &exec.ExitError{ProcessState: state}
+	// Wait for some time before sending process stdout as body to client.
+	// Because the http status code must be set before body.
+	// If the process exits before timeout with non-zero exit code, return error to client.
+	// If the process exits after timeout with none-zero exit code, there's no way to notify it to client.
+	if netreq.Timeout > 0 {
+		var cmderr error
+		var cmddone atomic.Bool
+		go func() {
+			//cmd.Wait will close pipes so do not use it.
+			state, err := cmd.Process.Wait()
+			if err == nil && !state.Success() {
+				cmderr = &exec.ExitError{ProcessState: state}
+			}
+			cmddone.Store(true)
+		}()
+		time.Sleep(time.Second * time.Duration(netreq.Timeout))
+		if cmddone.Load() && cmderr != nil {
+			buf := [4096]byte{}
+			n, _ := stderr.Read(buf[:])
+			stdout.Close()
+			stderr.Close()
+			return nil, fmt.Errorf("rclone process err: %v\n\n%s", cmderr, string(buf[:n]))
 		}
-		cmddone.Store(true)
-	}()
-	time.Sleep(time.Millisecond * 2000)
-	if cmddone.Load() && cmderr != nil {
-		buf := [4096]byte{}
-		n, _ := stderr.Read(buf[:])
-		stdout.Close()
-		stderr.Close()
-		return nil, fmt.Errorf("rclone process err: %v\n\n%s", cmderr, string(buf[:n]))
 	}
 	stderr.Close()
 	res.Body = stdout
@@ -682,5 +697,6 @@ func ReadCloserWithPrefix(rc io.ReadCloser, prefix []byte) io.ReadCloser {
 // Tell if abspath is a file system root path (e.g. "/" or "C:\")
 func IsRootPath(abspath string) bool {
 	p := path.Clean(abspath)
-	return strings.HasSuffix(p, "/")
+	return p == "" || p == "." || strings.HasSuffix(p, "/") || strings.HasSuffix(p, `\`) ||
+		regexp.MustCompile(`^[a-zA-Z]:$`).MatchString(p)
 }

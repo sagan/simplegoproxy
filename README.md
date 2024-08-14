@@ -28,6 +28,8 @@ Command-line flag arguments:
         Set "Access-Control-Allow-Origin: *" header for admin API
   -enable-file
         Enable file scheme url: "file:///path/to/file"
+  -enable-rclone
+        Enable rclone scheme url: "rclone://remote/path/to/file"
   -enable-unix
         Enable unix domain socket url: "unix:///path/to/socket:http://server/path"
   -key string
@@ -46,6 +48,10 @@ Command-line flag arguments:
         Prefix of settings in query parameters (default "_sgp_")
   -publicurl string
         Public url of this service. Used with "-sign". E.g. "https://sgp.example.com/". If set, will output the full generated entrypoint url instead of sign
+  -rclone-binary string
+        Rclone binary path (default "rclone")
+  -rclone-config string
+        Manually specify rclone config file path
   -rootpath string
         Root path (with leading and trailing slash) (default "/")
   -sign
@@ -141,12 +147,13 @@ Simplegoproxy will print the list of supported targets when starting. Currently 
 
 Simplegoproxy provides a http admin UI at `/admin/` path, e.g. `http://localhost:3000/admin/` . The admin UI allow users to generate entrypoint url for a target url and view history records of generated entrypoint urls. All data are stored in the browser local storage.
 
-### "unix://" and "file://" urls
+### "unix://", "file://", "rclone://" urls
 
-If `-enable-unix` or `-enable-file` flag is set, Simplegoproxy will support target urls of "unix://" or "file://" scheme, respectively.
+If `-enable-unix` or `-enable-file` or `-enable-rclone` flag is set, Simplegoproxy will support some additional schemes of urls, respectively.
 
 - `-enable-unix` : Make Simplegoproxy supports URLs of http(s) over unix domain socket in local file system. Target url example: `unix://path/to/socket:http://server/path`. Use `:` to split http resource url with the unix domain socket file path.
 - `-enable-file` : Make Simplegoproxy supports `file://` urls, which reference to local file system files. Target url example: `file:///root/foo.txt`. Dir listing is also supported.
+- `-enable-rclone` : Make Simplegoproxy supports `rclone://` urls, which reference to a file in [rclone](https://github.com/rclone/rclone) remote. Target url example: `rclone://remote/path/to/file.txt`. It lookups rclone from PATH and use default rclone config file location (`~/.config/rclone.conf`). To use other locations, use `-rclone-binary` and `-rclone-config` flags.
 
 ## Security tips
 

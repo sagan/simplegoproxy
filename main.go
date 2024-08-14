@@ -76,7 +76,7 @@ func main() {
 
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.Log, flags.Unix, flags.File,
-			flags.Rclone, flags.RcloneBinary, flags.RcloneConf)
+			flags.Rclone, flags.RcloneBinary, flags.RcloneConfig)
 	}))
 	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244

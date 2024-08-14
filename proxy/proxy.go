@@ -67,7 +67,7 @@ func sendError(w http.ResponseWriter, msg string, args ...any) {
 }
 
 func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string, keytypeBlacklist []string,
-	doLog, enableUnix, enableFile bool, enableRclone bool, rcloneBinary string, rcloneConf string) {
+	doLog, enableUnix, enableFile bool, enableRclone bool, rcloneBinary string, rcloneConfig string) {
 	defer r.Body.Close()
 	targetUrl := r.URL.EscapedPath()
 	var modparams url.Values
@@ -141,7 +141,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string
 		sendError(w, "unsupported url schema %q", targetUrlObj.Scheme)
 		return
 	}
-	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist, rcloneBinary, rcloneConf)
+	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist, rcloneBinary, rcloneConfig)
 	if err != nil {
 		sendError(w, "Failed to fetch url: %v", err)
 		return
@@ -157,7 +157,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string
 }
 
 func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
-	prefix, signkey string, keytypeBlacklist []string, rcloneBinary, rcloneConf string) (*http.Response, error) {
+	prefix, signkey string, keytypeBlacklist []string, rcloneBinary, rcloneConfig string) (*http.Response, error) {
 	header := http.Header{}
 	responseHeaders := map[string]string{}
 	subs := map[string]string{}
@@ -404,7 +404,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			Proxy:        proxy,
 			Norf:         norf,
 			RcloneBinary: rcloneBinary,
-			RcloneConf:   rcloneConf,
+			RcloneConfig: rcloneConfig,
 		})
 		if err != nil {
 			return res, err

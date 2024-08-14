@@ -3,7 +3,6 @@ import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "@rehooks/local-storage";
 import { Generate, GenerateRequest, fetchGenerate } from "./api.js";
-import { serialize } from "v8";
 
 interface InputForm {
   url: string;
@@ -14,6 +13,7 @@ interface InputForm {
   fdauth: boolean;
   addon: string;
   scope: string;
+  timeout: number;
 }
 
 export default function Home({}) {
@@ -36,6 +36,7 @@ export default function Home({}) {
       <form
         onSubmit={handleSubmit(async (data: InputForm) => {
           setSearchParams(serializeInputForm(data));
+
           if (data.url == "") {
             return;
           }
@@ -99,6 +100,14 @@ export default function Home({}) {
               {...register("fdauth")}
             />
             &nbsp;Forward Auth
+          </label>
+          <label>
+            timeout:&nbsp;
+            <input
+              type="number"
+              defaultValue={parseInt(searchParams.get("timeout")) || 0}
+              {...register("timeout", { valueAsNumber: true })}
+            />
           </label>
           <label>
             keytype:&nbsp;
@@ -202,7 +211,7 @@ function makeUrl(data: InputForm, prefix: string): string {
   let { url, fdua, fdauth, addon, ...others } = data;
   // Unlike go's url.Parse, JavaScript's URL refues to handle schemaless url
   url = url.trim();
-  if (!url.match(/^((https?|unix|file):\/\/|data:)/i)) {
+  if (!url.match(/^((https?|unix|file|rclone):\/\/|data:)/i)) {
     url = "https://" + url;
   }
   let urlObj = new URL(url);
@@ -213,6 +222,11 @@ function makeUrl(data: InputForm, prefix: string): string {
         continue;
       }
       value = "1";
+    } else if (typeof others[key] == "number") {
+      if (!others[key]) {
+        continue;
+      }
+      value = `${others[key]}`;
     } else {
       value = `${others[key]}`.trim();
       if (value == "") {
@@ -254,11 +268,10 @@ function serializeInputForm(data: InputForm): URLSearchParams {
       if (data[key]) {
         values[key] = "1";
       }
-    } else if (typeof data[key] == "string") {
-      if (data[key]) {
-        values[key] = data[key];
-      }
+    } else if (data[key]) {
+      values[key] = data[key];
     }
   }
+  console.log("serialize", values);
   return new URLSearchParams(values);
 }
