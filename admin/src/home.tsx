@@ -13,6 +13,7 @@ interface InputForm {
   fdua: boolean;
   fdauth: boolean;
   addon: string;
+  scope: string;
 }
 
 export default function Home({}) {
@@ -41,8 +42,7 @@ export default function Home({}) {
           try {
             let publicurl = window.__ROOTURL__;
             let url = makeUrl(data, window.__PREFIX__);
-            let keytype = data.keytype;
-            let req: GenerateRequest = { publicurl, url, keytype };
+            let req: GenerateRequest = { publicurl, url };
             // setValue("url", "");
             let res = await fetchGenerate(req);
             setUrls([res, ...urls]);
@@ -105,6 +105,13 @@ export default function Home({}) {
             <input
               defaultValue={searchParams.get("keytype") || ""}
               {...register("keytype")}
+            />
+          </label>
+          <label>
+            scope:&nbsp;
+            <input
+              defaultValue={searchParams.get("scope") || ""}
+              {...register("scope")}
             />
           </label>
           <label className="flex flex-1">
@@ -192,8 +199,10 @@ export default function Home({}) {
 }
 
 function makeUrl(data: InputForm, prefix: string): string {
-  let { url, keytype, fdua, fdauth, addon, ...others } = data;
-  if (!url.match(/^(https?:\/\/|data:)/i)) {
+  let { url, fdua, fdauth, addon, ...others } = data;
+  // Unlike go's url.Parse, JavaScript's URL refues to handle schemaless url
+  url = url.trim();
+  if (!url.match(/^((https?|unix|file):\/\/|data:)/i)) {
     url = "https://" + url;
   }
   let urlObj = new URL(url);

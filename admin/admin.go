@@ -100,8 +100,7 @@ func Generate(params url.Values) (data any, err error) {
 	if !params.Has("url") {
 		return nil, fmt.Errorf("invalid parameters")
 	}
-	canonicalurl, sign, entryurl := proxy.Generate(params.Get("url"), flags.Key, params.Get("keytype"),
-		params.Get("publicurl"), flags.Prefix)
+	canonicalurl, sign, entryurl := proxy.Generate(params.Get("url"), flags.Key, params.Get("publicurl"), flags.Prefix)
 	data = map[string]any{
 		"url":      canonicalurl,
 		"entryurl": entryurl,

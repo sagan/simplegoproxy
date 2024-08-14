@@ -239,6 +239,7 @@ window.addEventListener('DOMContentLoaded', onLoad);
 var loadTimeData;class LoadTimeData{constructor(){this.data_=null}set data(value){expect(!this.data_,"Re-setting data.");this.data_=value}valueExists(id){return id in this.data_}getValue(id){expect(this.data_,"No data. Did you remember to include strings.js?");const value=this.data_[id];expect(typeof value!=="undefined","Could not find value for "+id);return value}getString(id){const value=this.getValue(id);expectIsType(id,value,"string");return value}getStringF(id,var_args){const value=this.getString(id);if(!value){return""}const args=Array.prototype.slice.call(arguments);args[0]=value;return this.substituteString.apply(this,args)}substituteString(label,var_args){const varArgs=arguments;return label.replace(/\$(.|$|\n)/g,(function(m){expect(m.match(/\$[$1-9]/),"Unescaped $ found in localized string.");return m==="$$"?"$":varArgs[m[1]]}))}getBoolean(id){const value=this.getValue(id);expectIsType(id,value,"boolean");return value}getInteger(id){const value=this.getValue(id);expectIsType(id,value,"number");expect(value===Math.floor(value),"Number isn't integer: "+value);return value}overrideValues(replacements){expect(typeof replacements==="object","Replacements must be a dictionary object.");for(const key in replacements){this.data_[key]=replacements[key]}}}function expect(condition,message){if(!condition){throw new Error("Unexpected condition on "+document.location.href+": "+message)}}function expectIsType(id,value,type){expect(typeof value===type,"["+value+"] ("+id+") is not a "+type)}expect(!loadTimeData,"should only include this file once");loadTimeData=new LoadTimeData;window.loadTimeData=loadTimeData;console.warn("crbug/1173575, non-JS module files deprecated.");</script><script>loadTimeData.data = {"header":"Index of LOCATION","headerDateModified":"Date Modified","headerName":"Name","headerSize":"Size","language":"en","parentDirText":"[parent directory]","textdirection":"ltr"};</script>
 <script>
 function humanFileSize(size) {
+  if(size < 0) return size.toString();
 	var i = size == 0 ? 0 : Math.floor(Math.log(size) / Math.log(1024));
 	return +((size / Math.pow(1024, i)).toFixed(2)) * 1 + ' ' + ['B', 'KB', 'MB', 'GB', 'TB'][i];
 }
@@ -253,7 +254,7 @@ function humanFileSize(size) {
 
 	// function addRow(name, url, isdir, size, size_string, date_modified, date_modified_string)
 	{{range .Files}}
-	addRow({{js .Name}}, {{js .Name}}, {{.IsDir}}, {{.Size}}, humanFileSize({{.Size}}), {{.Time}}, new Date({{.Time}} * 1000).toISOString());
+	addRow({{js .Name}}, {{js .Name}}, {{.IsDir}}, {{.Size}}, humanFileSize({{.Size}}), {{.ModTime}}, new Date({{.ModTime}} * 1000).toISOString());
 	{{end}}
 </script>
 `

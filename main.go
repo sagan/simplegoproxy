@@ -51,7 +51,7 @@ func main() {
 			log.Fatalf("The signkey flag and at least one argument (url) must be provided")
 		}
 		for _, targetUrl := range args {
-			canonicalurl, sign, entryurl := proxy.Generate(targetUrl, flags.Key, flags.Keytype, flags.PublicUrl, flags.Prefix)
+			canonicalurl, sign, entryurl := proxy.Generate(targetUrl, flags.Key, flags.PublicUrl, flags.Prefix)
 			if entryurl != "" {
 				fmt.Printf("%s  %s\n", canonicalurl, entryurl)
 			} else {
@@ -69,12 +69,14 @@ func main() {
 	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s, prefix=%s, key=%s\n",
 		version.Version, flags.Port, flags.Rootpath, flags.Prefix, flags.Key)
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
+	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t\n", flags.File, flags.Unix, flags.Rclone)
 	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(proxy.TEXTUAL_MIMES, ", "))
 	fmt.Printf("Blacklist keytypes: %v\n", flags.KeytypeBlacklist)
 	fmt.Printf("Admin Web UI at %q with user/pass: %s:%s\n", adminPath, flags.User, flags.Pass)
 
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.Log, flags.Unix, flags.File)
+		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.Log, flags.Unix, flags.File,
+			flags.Rclone, flags.RcloneBinary, flags.RcloneConf)
 	}))
 	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244

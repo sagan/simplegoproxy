@@ -66,8 +66,8 @@ func sendError(w http.ResponseWriter, msg string, args ...any) {
 	w.Write([]byte(fmt.Sprintf(msg, args...)))
 }
 
-func ProxyFunc(w http.ResponseWriter, r *http.Request,
-	prefix string, key string, keytypeBlacklist []string, doLog, enableUnix, enableFile bool) {
+func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string, keytypeBlacklist []string,
+	doLog, enableUnix, enableFile bool, enableRclone bool, rcloneBinary string, rcloneConf string) {
 	defer r.Body.Close()
 	targetUrl := r.URL.EscapedPath()
 	var modparams url.Values
@@ -131,12 +131,17 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request,
 			sendError(w, "file url is not enabled")
 			return
 		}
+	case "rclone":
+		if !enableRclone {
+			sendError(w, "rclone url is not enabled")
+			return
+		}
 	case "http", "https", "data": // do nothing
 	default:
 		sendError(w, "unsupported url schema %q", targetUrlObj.Scheme)
 		return
 	}
-	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist)
+	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist, rcloneBinary, rcloneConf)
 	if err != nil {
 		sendError(w, "Failed to fetch url: %v", err)
 		return
@@ -152,7 +157,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request,
 }
 
 func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
-	prefix, signkey string, keytypeBlacklist []string) (*http.Response, error) {
+	prefix, signkey string, keytypeBlacklist []string, rcloneBinary, rcloneConf string) (*http.Response, error) {
 	header := http.Header{}
 	responseHeaders := map[string]string{}
 	subs := map[string]string{}
@@ -391,7 +396,16 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			return nil, fmt.Errorf("invalid http request: %v", err)
 		}
 		req.Header = header
-		res, err = util.FetchUrl(req, impersonate, insecure, timeout, proxy, norf)
+		res, err = util.FetchUrl(&util.NetRequest{
+			Req:          req,
+			Impersonate:  impersonate,
+			Insecure:     insecure,
+			Timeout:      timeout,
+			Proxy:        proxy,
+			Norf:         norf,
+			RcloneBinary: rcloneBinary,
+			RcloneConf:   rcloneConf,
+		})
 		if err != nil {
 			return res, err
 		}
@@ -473,9 +487,13 @@ func Realkey(key, keytype string) string {
 	return key
 }
 
-func Generate(targetUrl, key, keytype, publicurl, prefix string) (canonicalurl string, sign, entryurl string) {
+func Generate(targetUrl, key, publicurl, prefix string) (canonicalurl string, sign, entryurl string) {
 	urlObj, err := url.Parse(targetUrl)
-	canonicalurl = targetUrl
+	signstr := ""
+	sgpQuery := url.Values{}
+	normalQuery := url.Values{}
+	normalUrl := ""
+	keytype := ""
 	// use the full canonical url
 	if err == nil {
 		if urlObj.Scheme == "" {
@@ -483,11 +501,20 @@ func Generate(targetUrl, key, keytype, publicurl, prefix string) (canonicalurl s
 		}
 		if urlObj.Host != "" && urlObj.Path == "" {
 			urlObj.Path = "/"
-		} else if urlObj.Host == "" && !strings.Contains(urlObj.Path, "/") {
+		} else if (urlObj.Scheme == "http" || urlObj.Scheme == "https") && urlObj.Host == "" &&
+			!strings.Contains(urlObj.Path, "/") {
 			// "ipinfo.io" => schema=, host=, path=ipinfo.io . So add a root path.
 			urlObj.Path += "/"
 		}
 		urlQuery := urlObj.Query()
+		for key := range urlQuery {
+			if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {
+				sgpQuery[key] = urlQuery[key]
+			} else {
+				normalQuery[key] = urlQuery[key]
+			}
+		}
+		keytype = urlQuery.Get(prefix + KEYTYPE_STRING)
 		urlQuery.Del(prefix + SIGN_STRING)
 		urlQuery.Del(prefix + KEYTYPE_STRING)
 		urlObj.RawQuery = urlQuery.Encode() // query key sorted
@@ -505,24 +532,37 @@ func Generate(targetUrl, key, keytype, publicurl, prefix string) (canonicalurl s
 						urlQuery.Del(key)
 					}
 				}
-				canonicalurl = "?" + urlQuery.Encode()
+				signstr = "?" + urlQuery.Encode()
 			}
 		}
+		urlObj.RawQuery = normalQuery.Encode()
+		normalUrl = urlObj.String()
+	}
+	if canonicalurl == "" {
+		canonicalurl = targetUrl
+	}
+	if signstr == "" {
+		signstr = canonicalurl
 	}
 	if key != "" {
 		mac := hmac.New(sha256.New, []byte(Realkey(key, keytype)))
-		mac.Write([]byte(canonicalurl))
+		mac.Write([]byte(signstr))
 		sign = hex.EncodeToString(mac.Sum(nil))
+		sgpQuery.Set(prefix+SIGN_STRING, sign)
 		if publicurl != "" {
-			if keytype != "" {
-				entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
-					prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
+			if normalUrl != "" {
+				entryurl = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(publicurl, "/"), sgpQuery.Encode(), normalUrl)
 			} else {
-				entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
-					prefix, SIGN_STRING, sign, canonicalurl)
+				if keytype != "" {
+					entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+						prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
+				} else {
+					entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+						prefix, SIGN_STRING, sign, canonicalurl)
+				}
 			}
 		}
-	} else {
+	} else if publicurl != "" {
 		entryurl = fmt.Sprintf("%s/%s", strings.TrimSuffix(publicurl, "/"), canonicalurl)
 	}
 	return

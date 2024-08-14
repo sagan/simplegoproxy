@@ -6,7 +6,6 @@ interface Generate {
 
 interface GenerateRequest {
   url: string;
-  keytype: string;
   publicurl: string;
 }
 

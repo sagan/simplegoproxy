@@ -6,24 +6,39 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
+	"log"
 	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	"html/template"
-
 	"github.com/Noooste/azuretls-client"
+	range_parser "github.com/quantumsheep/range-parser"
 	"github.com/sagan/simplegoproxy/constants"
 )
+
+type NetRequest struct {
+	Req          *http.Request
+	Impersonate  string
+	Insecure     bool
+	Timeout      int
+	Proxy        string
+	Norf         bool
+	RcloneBinary string
+	RcloneConf   string
+}
 
 type ImpersonateProfile struct {
 	Name string
@@ -33,6 +48,14 @@ type ImpersonateProfile struct {
 	H2fingerprint string
 	Headers       [][]string // use "\n" as placeholder for order; use "" (empty) to delete a header
 	Comment       string
+}
+
+type rcloneLsjsonItem struct {
+	IsDir   bool          `json:"IsDir,omitempty"`
+	ModTime TimestampTime `json:"ModTime,omitempty"` // "2017-05-31T16:15:57.034468261+01:00"
+	Name    string        `json:"Name,omitempty"`    // "file.txt"
+	Path    string        `json:"Path,omitempty"`    //"full/path/file.txt". Relative to <root_path>
+	Size    int64         `json:"Size,omitempty"`    // -1 for dir
 }
 
 const (
@@ -121,123 +144,133 @@ var ImpersonateProfiles = map[string]*ImpersonateProfile{
 	},
 }
 
-func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
-	proxy string, norf bool) (*http.Response, error) {
-	if req.URL.Scheme == "unix" {
-		// req.URL: "unix:///path/to/socket:resource_url" .
-		// Host is empty and path is a ":" splitted two parts.
-		uncPath, resourceUrl, found := strings.Cut(req.URL.Path, ":")
-		if !found {
-			return nil, fmt.Errorf(`invalid unix domain socket url. format: "unix:///path/to/socket:resource_url"`)
-		}
-		httpc := http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", uncPath)
-				},
+func fetchUnix(req *http.Request) (*http.Response, error) {
+	// req.URL: "unix:///path/to/socket:resource_url" .
+	// Host is empty and path is a ":" splitted two parts.
+	uncPath, resourceUrl, found := strings.Cut(req.URL.Path, ":")
+	if !found {
+		return nil, fmt.Errorf(`invalid unix domain socket url. format: "unix:///path/to/socket:resource_url"`)
+	}
+	httpc := http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", uncPath)
 			},
-		}
-		resourceUrlObj, err := url.Parse(resourceUrl)
+		},
+	}
+	resourceUrlObj, err := url.Parse(resourceUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse unix domain socket resource url: %v", err)
+	}
+	dummyUrl := "http://unix/" + resourceUrlObj.Path
+	if req.URL.RawQuery != "" {
+		dummyUrl += "?" + req.URL.RawQuery
+	}
+	return httpc.Get(dummyUrl) // dummy http protocol url prefix
+}
+
+func fetchFile(req *http.Request) (*http.Response, error) {
+	localfilepath := req.URL.Path
+	// on Windows, strip leading "/" of file url, e.g. "file:///C:/a.txt" (path: "/C:/a.txt").
+	if runtime.GOOS == "windows" && regexp.MustCompile(`^/[a-zA-Z]:\/`).MatchString(localfilepath) {
+		localfilepath = localfilepath[1:]
+	}
+	localfilepath = filepath.Clean(localfilepath)
+	stat, err := os.Stat(localfilepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file %q: %v", localfilepath, err)
+	}
+	if stat.Mode().IsDir() {
+		tpl, err := template.New("template").Parse(constants.DIR_INDEX_HTML)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse unix domain socket resource url: %v", err)
+			return nil, fmt.Errorf("failed to compile dir index template: %v", err)
 		}
-		dummyUrl := "http://unix/" + resourceUrlObj.Path
-		if req.URL.RawQuery != "" {
-			dummyUrl += "?" + req.URL.RawQuery
-		}
-		return httpc.Get(dummyUrl) // dummy http protocol url prefix
-	} else if req.URL.Scheme == "file" {
-		localfilepath := req.URL.Path
-		// on Windows, strip leading "/" of file url, e.g. "file:///C:/a.txt" (path: "/C:/a.txt").
-		if runtime.GOOS == "windows" && regexp.MustCompile(`^/[a-zA-Z]:\/`).MatchString(localfilepath) {
-			localfilepath = localfilepath[1:]
-		}
-		localfilepath = filepath.Clean(localfilepath)
-		stat, err := os.Stat(localfilepath)
+		entries, err := os.ReadDir(localfilepath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to stat file %q: %v", localfilepath, err)
+			return nil, fmt.Errorf("failed to read dir: %v", err)
 		}
-		isRoot := filepath.Clean(filepath.Join(localfilepath, "..")) == localfilepath
-		if stat.Mode().IsDir() {
-			tpl, err := template.New("template").Parse(constants.DIR_INDEX_HTML)
-			if err != nil {
-				return nil, fmt.Errorf("failed to compile dir index template: %v", err)
+		files := []map[string]any{}
+		for _, entry := range entries {
+			file := map[string]any{
+				"Name":    entry.Name(),
+				"IsDir":   entry.IsDir(),
+				"ModTime": int64(0),
+				"Size":    int64(-1),
 			}
-			entries, err := os.ReadDir(localfilepath)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read dir: %v", err)
-			}
-			files := []map[string]any{}
-			for _, entry := range entries {
-				file := map[string]any{
-					"Name":  entry.Name(),
-					"IsDir": entry.IsDir(),
-					"Time":  int64(0),
-					"Size":  int64(0),
+			if info, err := entry.Info(); err == nil {
+				file["ModTime"] = info.ModTime().Unix()
+				if entry.Type().IsRegular() {
+					file["Size"] = info.Size()
 				}
-				if info, err := entry.Info(); err == nil {
-					file["Time"] = info.ModTime().Unix()
-					if entry.Type().IsRegular() {
-						file["Size"] = info.Size()
-					}
-				}
-				files = append(files, file)
 			}
-			buf := &bytes.Buffer{}
-			err = tpl.Execute(buf, map[string]any{
-				"Dir":    localfilepath,
-				"IsRoot": isRoot,
-				"Files":  files,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to render dir template: %v", err)
-			}
-			res := &http.Response{
-				StatusCode: http.StatusOK,
-				Header: http.Header{
-					"Content-Type":   []string{"text/html"},
-					"Content-Length": []string{fmt.Sprint(buf.Len())},
-				},
-				Body: io.NopCloser(buf),
-			}
-			return res, nil
+			files = append(files, file)
 		}
-		file, err := os.Open(localfilepath)
+		buf := &bytes.Buffer{}
+		err = tpl.Execute(buf, map[string]any{
+			"Dir":    localfilepath,
+			"IsRoot": IsRootPath(localfilepath),
+			"Files":  files,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to open file %q: %v", localfilepath, err)
+			return nil, fmt.Errorf("failed to render dir template: %v", err)
 		}
-		contentType := FileContentType(localfilepath)
-		res := &http.Response{Header: http.Header{}}
-		if req.Header.Get("Range") != "" {
-			rangesFile, err := NewRangesFile(file, contentType, stat.Size(), req.Header.Get("Range"))
-			if err != nil {
-				file.Close()
-				return nil, fmt.Errorf("invalid range: %v", err)
-			}
-			rangesFile.SetHeader(res.Header)
-			res.StatusCode = http.StatusPartialContent
-			res.Body = rangesFile
-		} else {
-			res.Header.Set("Content-Type", contentType)
-			res.Header.Set("Content-Length", fmt.Sprint(stat.Size()))
-			res.StatusCode = http.StatusOK
-			res.Body = file
+		res := &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type":   []string{"text/html"},
+				"Content-Length": []string{fmt.Sprint(buf.Len())},
+			},
+			Body: io.NopCloser(buf),
 		}
 		return res, nil
 	}
+	file, err := os.Open(localfilepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file %q: %v", localfilepath, err)
+	}
+	contentType := FileContentType(localfilepath)
+	res := &http.Response{Header: http.Header{
+		"Accept-Ranges": []string{"bytes"},
+		"Last-Modified": []string{stat.ModTime().Format(http.TimeFormat)},
+	}}
+	// HTTP Range Request.
+	// Reference: https://www.zeng.dev/post/2023-http-range-and-play-mp4-in-browser/ .
+	if req.Header.Get("Range") != "" {
+		rangesFile, err := NewRangesFile(file, contentType, stat.Size(), req.Header.Get("Range"))
+		if err != nil {
+			file.Close()
+			res.Header.Add("Content-Range", fmt.Sprintf("bytes */%d", stat.Size()))
+			res.StatusCode = http.StatusRequestedRangeNotSatisfiable
+			res.Body = io.NopCloser(strings.NewReader(fmt.Sprintf("err: %v", err)))
+			return res, nil
+		}
+		rangesFile.SetHeader(res.Header)
+		res.StatusCode = http.StatusPartialContent
+		res.Body = rangesFile
+	} else {
+		res.Header.Set("Content-Type", contentType)
+		res.Header.Set("Content-Length", fmt.Sprint(stat.Size()))
+		res.StatusCode = http.StatusOK
+		res.Body = file
+	}
+	return res, nil
+}
+
+func fetchHttp(netreq *NetRequest) (*http.Response, error) {
+	req := netreq.Req
 	reqUrl := req.URL.String()
-	if impersonate == "" {
+	if netreq.Impersonate == "" {
 		var httpClient *http.Client
-		if insecure || norf || proxy != "" || timeout > 0 {
+		if netreq.Insecure || netreq.Norf || netreq.Proxy != "" || netreq.Timeout > 0 {
 			httpClient = &http.Client{
-				Timeout: time.Duration(timeout) * time.Second,
+				Timeout: time.Duration(netreq.Timeout) * time.Second,
 			}
-			if insecure || proxy != "" {
+			if netreq.Insecure || netreq.Proxy != "" {
 				var proxyFunc func(*http.Request) (*url.URL, error)
-				if proxy != "" {
-					proxyUrl, err := url.Parse(proxy)
+				if netreq.Proxy != "" {
+					proxyUrl, err := url.Parse(netreq.Proxy)
 					if err != nil {
-						return nil, fmt.Errorf("failed to parse proxy %s: %v", proxy, err)
+						return nil, fmt.Errorf("failed to parse proxy %s: %v", netreq.Proxy, err)
 					}
 					proxyFunc = http.ProxyURL(proxyUrl)
 				} else {
@@ -245,10 +278,10 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 				}
 				httpClient.Transport = &http.Transport{
 					Proxy:           proxyFunc,
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: netreq.Insecure},
 				}
 			}
-			if norf {
+			if netreq.Norf {
 				httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 					return http.ErrUseLastResponse
 				}
@@ -258,12 +291,12 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 		}
 		return httpClient.Do(req)
 	}
-	ip := ImpersonateProfiles[impersonate]
+	ip := ImpersonateProfiles[netreq.Impersonate]
 	if ip == nil {
-		return nil, fmt.Errorf("impersonate target %s not supported", impersonate)
+		return nil, fmt.Errorf("impersonate target %s not supported", netreq.Impersonate)
 	}
 	session := azuretls.NewSession()
-	session.SetTimeout(time.Duration(timeout) * time.Second)
+	session.SetTimeout(time.Duration(netreq.Timeout) * time.Second)
 	if ip.Ja3 != "" {
 		if err := session.ApplyJa3(ip.Ja3, ip.Navigator); err != nil {
 			return nil, fmt.Errorf("failed to set ja3: %v", err)
@@ -274,15 +307,15 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 			return nil, fmt.Errorf("failed to set h2 finterprint: %v", err)
 		}
 	}
-	if proxy == "" {
-		proxy = ParseProxyFromEnv(reqUrl)
+	if netreq.Proxy == "" {
+		netreq.Proxy = ParseProxyFromEnv(reqUrl)
 	}
-	if proxy != "" {
-		if err := session.SetProxy(proxy); err != nil {
+	if netreq.Proxy != "" {
+		if err := session.SetProxy(netreq.Proxy); err != nil {
 			return nil, fmt.Errorf("failed to set proxy: %v", err)
 		}
 	}
-	if insecure {
+	if netreq.Insecure {
 		session.InsecureSkipVerify = true
 	}
 
@@ -319,7 +352,7 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 		Method:           req.Method,
 		Url:              reqUrl,
 		IgnoreBody:       true,
-		DisableRedirects: norf,
+		DisableRedirects: netreq.Norf,
 	}, orderedHeaders)
 	if err != nil {
 		if _, ok := err.(net.Error); ok {
@@ -332,6 +365,153 @@ func FetchUrl(req *http.Request, impersonate string, insecure bool, timeout int,
 		Header:     http.Header(res.Header),
 		Body:       res.RawBody,
 	}, nil
+}
+
+// https://rclone.org/commands/rclone_cat/
+func fetchRclone(netreq *NetRequest) (*http.Response, error) {
+	req := netreq.Req
+	rcloneBinary := netreq.RcloneBinary
+	if rcloneBinary == "" {
+		rcloneBinary = "rclone"
+	}
+	if req.URL.Host == "" {
+		return nil, fmt.Errorf("rclone remote name is empty")
+	}
+	// req.URL: "rclone://remote/path/to/file"
+	remotePathname := req.URL.Path
+	// rclone use "" (not "/") as canonical root path. But we use "/".
+	if remotePathname == "" {
+		remotePathname = "/"
+	}
+	remotePath := req.URL.Host + ":" + remotePathname
+
+	statargs := []string{"lsjson", "--stat", remotePath}
+	if netreq.RcloneConf != "" {
+		statargs = append(statargs, "--config", netreq.RcloneConf)
+	}
+	statcmd := exec.Command(rcloneBinary, statargs...)
+	statstr, err := statcmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rclone item stat [%v]: %v", statargs, err)
+	}
+	var stat *rcloneLsjsonItem
+	if err = json.Unmarshal(statstr, &stat); err != nil {
+		return nil, fmt.Errorf("failed to parse rclone stat: %v", err)
+	}
+
+	if stat.IsDir {
+		args := []string{"lsjson", remotePath}
+		if netreq.RcloneConf != "" {
+			args = append(args, "--config", netreq.RcloneConf)
+		}
+		cmd := exec.Command(rcloneBinary, args...)
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list rclone dir [%v]: %v", args, err)
+		}
+		var entries []*rcloneLsjsonItem
+		if err = json.Unmarshal(out, &entries); err != nil {
+			return nil, fmt.Errorf("failed to parse rclone lsjson: %v", err)
+		}
+		tpl, err := template.New("template").Parse(constants.DIR_INDEX_HTML)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile dir index template: %v", err)
+		}
+		buf := &bytes.Buffer{}
+		err = tpl.Execute(buf, map[string]any{
+			"Dir":    remotePath,
+			"IsRoot": IsRootPath(remotePathname),
+			"Files":  entries,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to render dir template: %v", err)
+		}
+		res := &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type":   []string{"text/html"},
+				"Content-Length": []string{fmt.Sprint(buf.Len())},
+			},
+			Body: io.NopCloser(buf),
+		}
+		return res, nil
+	}
+
+	res := &http.Response{
+		Header: http.Header{
+			"Content-Type":  []string{FileContentType(remotePath)},
+			"Last-Modified": []string{stat.ModTime.Format(http.TimeFormat)},
+			"Accept-Ranges": []string{"bytes"},
+		},
+	}
+	args := []string{"cat", remotePath}
+	if netreq.RcloneConf != "" {
+		args = append(args, "--config", netreq.RcloneConf)
+	}
+	if req.Header.Get("Range") != "" {
+		ranges, err := range_parser.Parse(stat.Size, req.Header.Get("Range"))
+		if err != nil || len(ranges) != 1 {
+			res.StatusCode = http.StatusRequestedRangeNotSatisfiable
+			res.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", stat.Size))
+			res.Header.Set("Content-Type", "text/plain; charset=UTF-8")
+			res.Body = io.NopCloser(strings.NewReader("invalid range (only single range is supported)"))
+			return res, nil
+		}
+		args = append(args, "--offset", fmt.Sprint(ranges[0].Start), "--count", fmt.Sprint(ranges[0].End-ranges[0].Start+1))
+		res.StatusCode = http.StatusPartialContent
+		res.Header.Set("Content-Length", fmt.Sprint(ranges[0].End-ranges[0].Start+1))
+		res.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", ranges[0].Start, ranges[0].End, stat.Size))
+	} else {
+		res.Header.Set("Content-Length", fmt.Sprint(stat.Size))
+		res.StatusCode = http.StatusOK
+	}
+	log.Printf("rclone %v", args)
+	cmd := exec.Command(rcloneBinary, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to pipe rclone stdout: %v", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to pipe rclone stderr: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to exec rclone: %v", err)
+	}
+	var cmderr error
+	var cmddone atomic.Bool
+	go func() {
+		//cmd.Wait will close pipes so do not use them.
+		state, err := cmd.Process.Wait()
+		if err == nil && !state.Success() {
+			cmderr = &exec.ExitError{ProcessState: state}
+		}
+		cmddone.Store(true)
+	}()
+	time.Sleep(time.Millisecond * 2000)
+	if cmddone.Load() && cmderr != nil {
+		buf := [4096]byte{}
+		n, _ := stderr.Read(buf[:])
+		stdout.Close()
+		stderr.Close()
+		return nil, fmt.Errorf("rclone process err: %v\n\n%s", cmderr, string(buf[:n]))
+	}
+	stderr.Close()
+	res.Body = stdout
+	return res, nil
+}
+
+func FetchUrl(netreq *NetRequest) (*http.Response, error) {
+	switch netreq.Req.URL.Scheme {
+	case "unix":
+		return fetchUnix(netreq.Req)
+	case "file":
+		return fetchFile(netreq.Req)
+	case "rclone":
+		return fetchRclone(netreq)
+	default:
+		return fetchHttp(netreq)
+	}
 }
 
 // Parse standard HTTP_PROXY, HTTPS_PROXY, NO_PROXY (and lowercase versions) envs, return proxy for urlStr.
@@ -480,4 +660,27 @@ func FileContentType(path string) string {
 		contentType = constants.DEFAULT_MIME
 	}
 	return contentType
+}
+
+type prefixReadCloser struct {
+	io.Reader
+	rc io.ReadCloser
+}
+
+func (p *prefixReadCloser) Close() error {
+	return p.rc.Close()
+}
+
+// Return io.ReadCloser that return prefix, then read from rc.
+func ReadCloserWithPrefix(rc io.ReadCloser, prefix []byte) io.ReadCloser {
+	return &prefixReadCloser{
+		Reader: io.MultiReader(bytes.NewReader(prefix), rc),
+		rc:     rc,
+	}
+}
+
+// Tell if abspath is a file system root path (e.g. "/" or "C:\")
+func IsRootPath(abspath string) bool {
+	p := path.Clean(abspath)
+	return strings.HasSuffix(p, "/")
 }

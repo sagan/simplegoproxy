@@ -26,6 +26,10 @@ Command-line flag arguments:
 ```
   -cors
         Set "Access-Control-Allow-Origin: *" header for admin API
+  -enable-file
+        Enable file scheme url: "file:///path/to/file"
+  -enable-unix
+        Enable unix domain socket url: "unix:///path/to/socket:http://server/path"
   -key string
         The sign key. If set, all requests must be signed using HMAC(key, 'sha-256', payload=url), providing calculated MAC (hex string) in _sgp_sign
   -keytype string
@@ -59,7 +63,7 @@ Append the target url to the root path to generate the "entrypoint url". E.g.: (
 ```
 curl -i "localhost:3000/https://ipcfg.co/json"
 
-# The schema:// part of target url can be omitted, in which case "https://" is assumed
+# The scheme:// part of target url can be omitted, in which case "https://" is assumed
 curl -i "localhost:3000/ipcfg.co/json"
 ```
 
@@ -137,6 +141,13 @@ Simplegoproxy will print the list of supported targets when starting. Currently 
 
 Simplegoproxy provides a http admin UI at `/admin/` path, e.g. `http://localhost:3000/admin/` . The admin UI allow users to generate entrypoint url for a target url and view history records of generated entrypoint urls. All data are stored in the browser local storage.
 
+### "unix://" and "file://" urls
+
+If `-enable-unix` or `-enable-file` flag is set, Simplegoproxy will support target urls of "unix://" or "file://" scheme, respectively.
+
+- `-enable-unix` : Make Simplegoproxy supports URLs of http(s) over unix domain socket in local file system. Target url example: `unix://path/to/socket:http://server/path`. Use `:` to split http resource url with the unix domain socket file path.
+- `-enable-file` : Make Simplegoproxy supports `file://` urls, which reference to local file system files. Target url example: `file:///root/foo.txt`. Dir listing is also supported.
+
 ## Security tips
 
 ### Set the rootpath
@@ -149,7 +160,7 @@ E.g.: If rootpath is set to "/abc/", then the entrypoint url should be like `htt
 
 Additional, if "key" flag is set, all requests to Simplegoproxy must be signed via HMAC-SHA256 using the key. The message being signed is the "canonical url" of the request. The result MAC (message authentication code) should be provided in `_sgp_sign` parameter of the request.
 
-The "canonical url" is the target url with all `_sgp_*` modification parameters (excluding `_sgp_sign`) in query values. All query values sorted by key.
+The "canonical url" is the target url with all `_sgp_*` modification parameters (excluding `_sgp_sign` and `_sgp_keytype`) in query values. All query values sorted by key.
 
 To calculate the `_sgp_sign` value of a target url, run `simplegoproxy` with `-sign` flag. E.g.:
 
@@ -241,7 +252,10 @@ Then use the following entrypoint url:
 curl -i "localhost:3000/_sgp_sign=edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410716bc9d7041e64c715&_sgp_scope=https%3A%2F%2F%2A%2F%2A/ipinfo.io/ip"
 ```
 
-The `_sgp_scope` parameter can be set multiple times. The sign can be used to access any target URL which matches with at least one provided scope.
+Notes:
+
+- The `_sgp_scope` parameter can be set multiple times. The sign can be used to access any target URL which matches with at least one provided scope.
+- A `*` scheme in scope parameter means "http" or "https". E.g. the `*://*/*` scope matches with all "http://" or "https://" urls. If you want to target other schemes like "file" ("file://" url) as well, you must put it in explicitly.
 
 ### Referer restrictions
 
