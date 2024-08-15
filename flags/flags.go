@@ -7,11 +7,15 @@ var (
 	Sign                bool
 	Log                 bool
 	Cors                bool
-	Unix                bool
-	File                bool
-	Rclone              bool
+	EnableUnix          bool
+	EnableFile          bool
+	EnableRclone        bool
+	EnableCurl          bool
+	EnableExec          bool
+	EnableAll           bool
 	RcloneBinary        string
 	RcloneConfig        string
+	CurlBinary          string
 	Rootpath            string
 	Prefix              string
 	Key                 string
@@ -26,12 +30,17 @@ var (
 func init() {
 	flag.IntVar(&Port, "port", 3000, "Http listening port")
 	flag.BoolVar(&Log, "log", false, "Log every request urls")
-	flag.BoolVar(&Unix, "enable-unix", false, `Enable unix domain socket url: "unix:///path/to/socket:http://server/path"`)
-	flag.BoolVar(&File, "enable-file", false, `Enable file scheme url: "file:///path/to/file"`)
-	flag.BoolVar(&Rclone, "enable-rclone", false, `Enable rclone scheme url: "rclone://remote/path/to/file"`)
+	flag.BoolVar(&EnableUnix, "enable-unix", false, `Enable unix domain socket url: "unix:///path/to/socket:http://server/path"`)
+	flag.BoolVar(&EnableFile, "enable-file", false, `Enable file scheme url: "file:///path/to/file"`)
+	flag.BoolVar(&EnableRclone, "enable-rclone", false, `Enable rclone scheme url: "rclone://remote/path/to/file"`)
+	flag.BoolVar(&EnableExec, "enable-exec", false, `Enable exec scheme url: "exec:///path/to/bin?arg=foo&arg=bar"`)
+	flag.BoolVar(&EnableCurl, "enable-curl", false, `Enable "curl+*" scheme url: "curl+https://ipinfo.io"`)
+	flag.BoolVar(&EnableAll, "enable-all", false, `Enable all schemes url: unix & file & rclone & curl & exec`)
 	flag.BoolVar(&Cors, "cors", false, `Set "Access-Control-Allow-Origin: *" header for admin API`)
-	flag.BoolVar(&Sign, "sign", false, `Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)`)
+	flag.BoolVar(&Sign, "sign", false,
+		`Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)`)
 	flag.StringVar(&RcloneBinary, "rclone-binary", "rclone", "Rclone binary path")
+	flag.StringVar(&CurlBinary, "curl-binary", "curl", "Curl binary path")
 	flag.StringVar(&RcloneConfig, "rclone-config", "", "Manually specify rclone config file path")
 	flag.StringVar(&Rootpath, "rootpath", "/", "Root path (with leading and trailing slash)")
 	flag.StringVar(&PublicUrl, "publicurl", "",

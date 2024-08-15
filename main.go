@@ -26,13 +26,21 @@ func main() {
 		if flagsSet[f.Name] {
 			return
 		}
-		if envValue := os.Getenv(strings.ToUpper(f.Name)); envValue != "" {
+		envname := strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
+		if envValue := os.Getenv(envname); envValue != "" {
 			err := f.Value.Set(envValue)
 			if err != nil {
-				log.Fatalf("Failed to set %s flag to %s from env: %v", f.Name, envValue, err)
+				log.Fatalf("Failed to set %s flag to %q from env %s: %v", f.Name, envValue, envname, err)
 			}
 		}
 	})
+	if flags.EnableAll {
+		flags.EnableUnix = true
+		flags.EnableFile = true
+		flags.EnableRclone = true
+		flags.EnableCurl = true
+		flags.EnableExec = true
+	}
 	if !strings.HasPrefix(flags.Rootpath, "/") {
 		flags.Rootpath = "/" + flags.Rootpath
 	}
@@ -69,14 +77,18 @@ func main() {
 	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s, prefix=%s, key=%s\n",
 		version.Version, flags.Port, flags.Rootpath, flags.Prefix, flags.Key)
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
-	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t\n", flags.File, flags.Unix, flags.Rclone)
+	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t, curl=%t, exec=%t\n",
+		flags.EnableFile, flags.EnableUnix, flags.EnableRclone, flags.EnableCurl, flags.EnableExec)
 	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(proxy.TEXTUAL_MIMES, ", "))
 	fmt.Printf("Blacklist keytypes: %v\n", flags.KeytypeBlacklist)
 	fmt.Printf("Admin Web UI at %q with user/pass: %s:%s\n", adminPath, flags.User, flags.Pass)
+	fmt.Printf("simplegoproxy is a open source software. See: https://github.com/sagan/simplegoproxy\n")
+	fmt.Printf("\n")
 
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.Log, flags.Unix, flags.File,
-			flags.Rclone, flags.RcloneBinary, flags.RcloneConfig)
+		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.Log, flags.EnableUnix,
+			flags.EnableFile, flags.EnableRclone, flags.EnableCurl, flags.EnableExec,
+			flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary)
 	}))
 	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244

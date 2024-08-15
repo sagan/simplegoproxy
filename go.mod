@@ -4,6 +4,7 @@ go 1.21.0
 
 require (
 	github.com/Noooste/azuretls-client v1.5.2
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/quantumsheep/range-parser v1.1.0
 	github.com/vincent-petithory/dataurl v1.0.0
 )

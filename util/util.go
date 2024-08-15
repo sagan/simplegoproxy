@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Noooste/azuretls-client"
+	"github.com/google/shlex"
 	range_parser "github.com/quantumsheep/range-parser"
 	"github.com/sagan/simplegoproxy/constants"
 )
@@ -38,6 +38,12 @@ type NetRequest struct {
 	Norf         bool
 	RcloneBinary string
 	RcloneConfig string
+	CurlBinary   string
+	Debug        bool
+	Username     string
+	Password     string
+	DoLog        bool
+	Params       url.Values // original all "_sgp" params
 }
 
 type ImpersonateProfile struct {
@@ -170,12 +176,10 @@ func fetchUnix(req *http.Request) (*http.Response, error) {
 }
 
 func fetchFile(req *http.Request) (*http.Response, error) {
-	localfilepath := req.URL.Path
-	// on Windows, strip leading "/" of file url, e.g. "file:///C:/a.txt" (path: "/C:/a.txt").
-	if runtime.GOOS == "windows" && regexp.MustCompile(`^/[a-zA-Z]:\/`).MatchString(localfilepath) {
-		localfilepath = localfilepath[1:]
+	localfilepath := ParseLocalFileUrlFilepath(req.URL)
+	if localfilepath == "" {
+		return nil, fmt.Errorf("invalid file url")
 	}
-	localfilepath = filepath.Clean(localfilepath)
 	stat, err := os.Stat(localfilepath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat file %q: %v", localfilepath, err)
@@ -296,6 +300,7 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 		return nil, fmt.Errorf("impersonate target %s not supported", netreq.Impersonate)
 	}
 	session := azuretls.NewSession()
+	session.SetContext(req.Context())
 	session.SetTimeout(time.Duration(netreq.Timeout) * time.Second)
 	if ip.Ja3 != "" {
 		if err := session.ApplyJa3(ip.Ja3, ip.Navigator); err != nil {
@@ -367,6 +372,162 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 	}, nil
 }
 
+// If timeout > 0, it will wait for timeout seconds before returning process stdout as body.
+// If the child process exits before timeout with non-zero exit code, it returns error.
+// If the child process exits after timeout with none-zero exit code, there's no way to notify it to caller.
+// If combine is true, the body is the combined stdout and stderr of child process, instead of stdout only.
+// If returned err is nil, the caller is responsible to close the returned body.
+func runProcess(ctx context.Context, binary string, args []string, timeout int,
+	combine bool) (body io.ReadCloser, err error) {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	var stdout, stderr io.ReadCloser
+	var combineReader, combineWriter *os.File
+	if combine {
+		combineReader, combineWriter, err = os.Pipe()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create combined pipe: %v", err)
+		}
+		cmd.Stdout = combineWriter
+		cmd.Stderr = combineWriter
+	} else {
+		stdout, err = cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("failed to pipe process stdout: %v", err)
+		}
+		stderr, err = cmd.StderrPipe()
+		if err != nil {
+			return nil, fmt.Errorf("failed to pipe process stderr: %v", err)
+		}
+	}
+	if err := cmd.Start(); err != nil {
+		if combine {
+			combineReader.Close()
+			combineWriter.Close()
+		}
+		return nil, fmt.Errorf("failed to exec process: %v", err)
+	}
+	if combine {
+		combineWriter.Close()
+	}
+	if timeout > 0 {
+		var cmderr error
+		var cmddone atomic.Bool
+		go func() {
+			//cmd.Wait will close pipes so do not use it.
+			state, err := cmd.Process.Wait()
+			if err == nil && !state.Success() {
+				cmderr = &exec.ExitError{ProcessState: state}
+			}
+			cmddone.Store(true)
+		}()
+		time.Sleep(time.Second * time.Duration(timeout))
+		if cmddone.Load() && cmderr != nil {
+			buf := [10240]byte{}
+			var n int
+			if combine {
+				n, _ = combineReader.Read(buf[:])
+				combineReader.Close()
+			} else {
+				n, _ = stderr.Read(buf[:])
+				stdout.Close()
+				stderr.Close()
+			}
+			return nil, fmt.Errorf("process err: %v\n\n%s", cmderr, string(buf[:n]))
+		}
+	}
+	if combine {
+		return combineReader, nil
+	} else {
+		stderr.Close()
+		return stdout, nil
+	}
+}
+
+// Use curl to fetch url
+func fetchCurl(netreq *NetRequest) (res *http.Response, err error) {
+	req := netreq.Req
+	curl := netreq.CurlBinary
+	if curl == "" {
+		curl = "curl"
+	}
+	var args []string
+	if netreq.Username != "" {
+		args = append(args, "--user", netreq.Username+":"+netreq.Password)
+	}
+	if netreq.Insecure {
+		args = append(args, "--insecure")
+	}
+	if netreq.Proxy != "" {
+		args = append(args, "--proxy", netreq.Proxy)
+	}
+	if req.Method != http.MethodGet {
+		args = append(args, "--request", req.Method)
+	}
+	if req.Body != nil {
+		data, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read request body: %v", err)
+		}
+		req.Body.Close()
+		if len(data) > 0 {
+			args = append(args, "--data-raw", string(data))
+		}
+	}
+	for key, values := range req.Header {
+		for _, value := range values {
+			args = append(args, "--header", fmt.Sprintf("%s: %s", key, value))
+		}
+	}
+	if curlargs, err := getArgs(netreq.Params); err != nil {
+		return nil, err
+	} else {
+		args = append(args, curlargs...)
+	}
+	args = append(args, req.URL.String())
+	if netreq.DoLog {
+		log.Printf("Run %s %v", curl, args)
+	}
+	body, err := runProcess(req.Context(), curl, args, netreq.Timeout, netreq.Debug)
+	if err != nil {
+		return nil, err
+	}
+	res = &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			// guess mime fron url
+			"Content-Type": []string{FileContentType(req.URL.Path)},
+		},
+		Body: body,
+	}
+	return res, nil
+}
+
+// "exec:///path/to/binary?arg=a&arg=b" => "/path/to/binary a b"
+func fetchExec(netreq *NetRequest) (res *http.Response, err error) {
+	localfilepath := ParseExecUrlFilepath(netreq.Req.URL)
+	if localfilepath == "" {
+		return nil, fmt.Errorf("invalid file url")
+	}
+	queryParams := netreq.Req.URL.Query()
+	args, err := getArgs(queryParams)
+	if err != nil {
+		return nil, err
+	}
+	if netreq.DoLog {
+		log.Printf("Run %s %v", localfilepath, args)
+	}
+	body, err := runProcess(netreq.Req.Context(), localfilepath, args, netreq.Timeout, netreq.Debug)
+	if err != nil {
+		return nil, err
+	}
+	res = &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       body,
+	}
+	return res, nil
+}
+
 // https://rclone.org/commands/rclone_cat/
 func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 	req := netreq.Req
@@ -385,7 +546,7 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 	if netreq.RcloneConfig != "" {
 		statargs = append(statargs, "--config", netreq.RcloneConfig)
 	}
-	statcmd := exec.Command(rcloneBinary, statargs...)
+	statcmd := exec.CommandContext(req.Context(), rcloneBinary, statargs...)
 	statstr, err := statcmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get rclone item stat [%v]: %v", statargs, err)
@@ -400,7 +561,7 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		if netreq.RcloneConfig != "" {
 			args = append(args, "--config", netreq.RcloneConfig)
 		}
-		cmd := exec.Command(rcloneBinary, args...)
+		cmd := exec.CommandContext(req.Context(), rcloneBinary, args...)
 		out, err := cmd.Output()
 		if err != nil {
 			return nil, fmt.Errorf("failed to list rclone dir [%v]: %v", args, err)
@@ -462,7 +623,7 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		if err != nil || len(ranges) != 1 {
 			res.StatusCode = http.StatusRequestedRangeNotSatisfiable
 			res.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", stat.Size))
-			res.Header.Set("Content-Type", "text/plain; charset=UTF-8")
+			res.Header.Set("Content-Type", "text/plain; charset=utf-8")
 			res.Body = io.NopCloser(strings.NewReader("invalid range (only single range is supported)"))
 			return res, nil
 		}
@@ -474,49 +635,22 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		res.Header.Set("Content-Length", fmt.Sprint(stat.Size))
 		res.StatusCode = http.StatusOK
 	}
-	log.Printf("rclone %v", args)
-	cmd := exec.Command(rcloneBinary, args...)
-	stdout, err := cmd.StdoutPipe()
+	if netreq.DoLog {
+		log.Printf("Run %s %v", rcloneBinary, args)
+	}
+	body, err := runProcess(req.Context(), rcloneBinary, args, netreq.Timeout, netreq.Debug)
 	if err != nil {
-		return nil, fmt.Errorf("failed to pipe rclone stdout: %v", err)
+		return nil, err
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to pipe rclone stderr: %v", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to exec rclone: %v", err)
-	}
-	// Wait for some time before sending process stdout as body to client.
-	// Because the http status code must be set before body.
-	// If the process exits before timeout with non-zero exit code, return error to client.
-	// If the process exits after timeout with none-zero exit code, there's no way to notify it to client.
-	if netreq.Timeout > 0 {
-		var cmderr error
-		var cmddone atomic.Bool
-		go func() {
-			//cmd.Wait will close pipes so do not use it.
-			state, err := cmd.Process.Wait()
-			if err == nil && !state.Success() {
-				cmderr = &exec.ExitError{ProcessState: state}
-			}
-			cmddone.Store(true)
-		}()
-		time.Sleep(time.Second * time.Duration(netreq.Timeout))
-		if cmddone.Load() && cmderr != nil {
-			buf := [4096]byte{}
-			n, _ := stderr.Read(buf[:])
-			stdout.Close()
-			stderr.Close()
-			return nil, fmt.Errorf("rclone process err: %v\n\n%s", cmderr, string(buf[:n]))
-		}
-	}
-	stderr.Close()
-	res.Body = stdout
+	res.Body = body
 	return res, nil
 }
 
 func FetchUrl(netreq *NetRequest) (*http.Response, error) {
+	if strings.HasPrefix(netreq.Req.URL.Scheme, "curl+") && len(netreq.Req.URL.Scheme) > 5 {
+		netreq.Req.URL.Scheme = netreq.Req.URL.Scheme[5:]
+		return fetchCurl(netreq)
+	}
 	switch netreq.Req.URL.Scheme {
 	case "unix":
 		return fetchUnix(netreq.Req)
@@ -524,6 +658,8 @@ func FetchUrl(netreq *NetRequest) (*http.Response, error) {
 		return fetchFile(netreq.Req)
 	case "rclone":
 		return fetchRclone(netreq)
+	case "exec":
+		return fetchExec(netreq)
 	default:
 		return fetchHttp(netreq)
 	}
@@ -677,6 +813,20 @@ func FileContentType(path string) string {
 	return contentType
 }
 
+// Get mime from str. str could be:
+// already a mime (do nothing);
+// or a file ext (with or without leading dot) or file name.
+func Mime(str string) string {
+	if !strings.Contains(str, `/`) {
+		if !strings.Contains(str, ".") {
+			str = "." + str
+		}
+		return FileContentType(str)
+	} else {
+		return str
+	}
+}
+
 type prefixReadCloser struct {
 	io.Reader
 	rc io.ReadCloser
@@ -695,8 +845,76 @@ func ReadCloserWithPrefix(rc io.ReadCloser, prefix []byte) io.ReadCloser {
 }
 
 // Tell if abspath is a file system root path (e.g. "/" or "C:\")
+// abspath should be a Cleaned absolute file path.
 func IsRootPath(abspath string) bool {
-	p := path.Clean(abspath)
-	return p == "" || p == "." || strings.HasSuffix(p, "/") || strings.HasSuffix(p, `\`) ||
-		regexp.MustCompile(`^[a-zA-Z]:$`).MatchString(p)
+	return abspath == "" || abspath == "." || strings.HasSuffix(abspath, "/") || strings.HasSuffix(abspath, `\`) ||
+		regexp.MustCompile(`^[a-zA-Z]:$`).MatchString(abspath)
+}
+
+// parse a "file://" (or custom scheme with same struct) url, extract full file system path.
+// If url is malformed or invalid, it just returns empty string.
+// E.g. "file:///root/a.txt" => "/root/a.txt".
+// If windows is true, it will treat url as a windows path:
+// 1. Use "\" as path sep instead of `/`. 2. support unc pathes:
+// "file://server/folder/data.xml" or "file:////server/folder/data.xml" => "\\server\folder\data.xml".
+// 2. support Drive letter in url: "file:///D:/foo.txt" => "D:\foo.txt"
+// If windows is false, it will treat a non-empty host in urlObj (except "localhost") as invalid.
+// The returned path is NOT cleaned.
+// Reference: https://en.wikipedia.org/wiki/File_URI_scheme .
+func ParseFileUrlFilepath(urlObj *url.URL, windows bool) string {
+	abspath := ""
+	if urlObj.Host != "" {
+		if windows {
+			abspath = `\\` + urlObj.Host
+		} else if urlObj.Host != "localhost" {
+			return ""
+		}
+	}
+	pathname := urlObj.Path
+	if windows {
+		if strings.HasPrefix(urlObj.Path, `//`) && abspath != "" {
+			return "" // malformed url like "file://server//server", duplicate unc hostname.
+		}
+		if abspath == "" && regexp.MustCompile(`^/[a-zA-Z]:\/`).MatchString(pathname) {
+			pathname = pathname[1:]
+		}
+	}
+	abspath += pathname
+	if windows {
+		abspath = strings.ReplaceAll(abspath, `/`, `\`)
+	}
+	return abspath
+}
+
+// Similar to ParseFileUrlFilepath, but treat urlObj as a local file system url automatically.
+// Also, the returned path is fullpath.Cleaned.
+func ParseLocalFileUrlFilepath(urlObj *url.URL) string {
+	abspath := ParseFileUrlFilepath(urlObj, runtime.GOOS == "windows")
+	if abspath != "" {
+		abspath = filepath.Clean(abspath)
+	}
+	return abspath
+}
+
+// Parse binary file path from "exec://" url.
+// It's a custom scheme that's different with "file://" scheme that:
+// In url parts: if host exists but pathname does not, treat it as a binary in PATH:
+// "exec://pwd" => "pwd".
+func ParseExecUrlFilepath(urlObj *url.URL) string {
+	if urlObj.Host != "" && (urlObj.Path == "" || urlObj.Path == "/") {
+		return urlObj.Host
+	}
+	return ParseLocalFileUrlFilepath(urlObj)
+}
+
+// Get from "args" or "arg" variable(s) of query param.
+func getArgs(queryParams url.Values) (args []string, err error) {
+	if queryParams.Has("args") {
+		if args, err = shlex.Split(queryParams.Get("args")); err != nil {
+			return nil, fmt.Errorf("invalid arags: %v", err)
+		}
+	} else {
+		args = queryParams["arg"]
+	}
+	return args, nil
 }

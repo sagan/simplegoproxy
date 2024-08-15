@@ -209,9 +209,13 @@ export default function Home({}) {
 
 function makeUrl(data: InputForm, prefix: string): string {
   let { url, fdua, fdauth, addon, ...others } = data;
-  // Unlike go's url.Parse, JavaScript's URL refues to handle schemaless url
+  // Unlike go's url.Parse, JavaScript's URL refues to handle schemeless url
   url = url.trim();
-  if (!url.match(/^((https?|unix|file|rclone):\/\/|data:)/i)) {
+  if (
+    !url.match(
+      /^((https?|unix|file|rclone|exec|curl\+[a-z][a-z0-9]*):\/\/|data:)/i
+    )
+  ) {
     url = "https://" + url;
   }
   let urlObj = new URL(url);

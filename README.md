@@ -26,6 +26,14 @@ Command-line flag arguments:
 ```
   -cors
         Set "Access-Control-Allow-Origin: *" header for admin API
+  -curl-binary string
+        Curl binary path (default "curl")
+  -enable-all
+        Enable all schemes url: unix & file & rclone & curl & exec
+  -enable-curl
+        Enable "curl+*" scheme url: "curl+https://ipinfo.io"
+  -enable-exec
+        Enable exec scheme url: "exec:///path/to/bin?arg=foo&arg=bar"
   -enable-file
         Enable file scheme url: "file:///path/to/file"
   -enable-rclone
@@ -60,7 +68,7 @@ Command-line flag arguments:
         Username of admin UI (Admin UI is available at "/admin" path) (default "root")
 ```
 
-All arguments are optional, and can also be set by environment variable with the same name in uppercase, e.g.: "port" flag can also be set using "PORT" env.
+All arguments are optional, and can also be set by environment variable. The environment variable name is the flag name in uppercase and replacing `-` with `_`. E.g.: `port` flag can be set using `PORT` env; `enable-file` flag can be set using `ENABLE_FILE` env. To set a boolean (toggle) flag, use `true` of `false` env value.
 
 ## Usage
 
@@ -96,6 +104,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_insecure` : (Value ignored) Ignore any TLS cert error in http request.
 - `_sgp_norf` : (Value ignored) Do not follow redirects.
 - `_sgp_nocache` : (Value ignored) Add the no-cache headers to original response.
+- `_sgp_debug` : (Value ignored) Debug mode.
 - `_sgp_proxy=socks5://1.2.3.4:1080` : Set the proxy for the http request.
 - `_sgp_timeout=5` : Set the timeout for the http request (seconds).
 - `_sgp_method=GET` : Set the method for the http request. Default to `GET`.
@@ -105,9 +114,10 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_forcesub` : (Value ignored) Force apply `_sgp_sub_` rules to the response of any MIME type.
 - `_sgp_cookie=<value>` : Set request cookie. Equivalent to `_sgp_header_cookie=<value>`.
 - `_sgp_type=<value>` : Set the request content type. Equivalent to `_sgp_header_Content-Type=<value>`. If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
+- `_sgp_restype=<value>` : Set the response content type. Equivalent to `_sgp_resheader_Content-Type=<value>`. Additionally, `_sgp_type` and `_sgp_restype` support file extension values like `txt` or `.txt` (with or without leading dot), in which case it will use the MIME type associated with the file extension ext.
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. A special `*` value can be used to forward ALL request headers. The following headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`; A special "\n" (`%0A`) value supresses this behavior and makes sure no headers would be forwarded.
-- `_sgp_basicauth=user:password` : Set the HTTP Basic Authentication for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
+- `_sgp_user=username:password` : Set the authentication username & password for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below "Impersonate the Browser" section.
 - `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.
 - `_sgp_keytype` : The sign key type. See below "Signing key type" section.
@@ -147,29 +157,57 @@ Simplegoproxy will print the list of supported targets when starting. Currently 
 
 Simplegoproxy provides a http admin UI at `/admin/` path, e.g. `http://localhost:3000/admin/` . The admin UI allow users to generate entrypoint url for a target url and view history records of generated entrypoint urls. All data are stored in the browser local storage.
 
-### "unix://", "file://", "rclone://" urls
+### "data:" urls
 
-If `-enable-unix` or `-enable-file` or `-enable-rclone` flag is set, Simplegoproxy will support some additional schemes of urls, respectively.
+Simplegoproxy supports `data:` urls ([Data URLs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs)), which will use the provided contents directly as the response body.
+
+E.g.
+
+```
+http://localhost:3000/data:,Hello%2C%20World%21
+
+http://localhost:3000/data:text/html;base64,SGVsbG8sIFdvcmxkIQ==
+```
+
+Both of above entrypoint urls will output "Hello, World!". The later one will also set the `Content-Type: text/html` response header.
+
+### `unix://`, `file://`, `rclone://`, `curl+*//`, `exec://` urls
+
+If `-enable-unix`, `-enable-file`, `-enable-rclone` or `-enable-exec` flag is set, Simplegoproxy will support some additional schemes of urls respectively. If `-enable-all` flag is set, all these schemes will be enabled.
 
 - `-enable-unix` : Make Simplegoproxy supports URLs of http(s) over unix domain socket in local file system. Target url example: `unix://path/to/socket:http://server/path`. Use `:` to split http resource url with the unix domain socket file path.
-- `-enable-file` : Make Simplegoproxy supports `file://` urls, which reference to local file system files. Target url example: `file:///root/foo.txt`. Dir listing is also supported.
-- `-enable-rclone` : Make Simplegoproxy supports `rclone://` urls, which reference to a file in [rclone](https://github.com/rclone/rclone) remote. Target url example: `rclone://remote/path/to/file.txt`. It lookups rclone from PATH and use default rclone config file location (`~/.config/rclone.conf`). To use other locations, use `-rclone-binary` and `-rclone-config` flags.
+- `-enable-file` : Make Simplegoproxy supports `file://` ([File URI scheme](https://en.wikipedia.org/wiki/File_URI_scheme)) urls, which reference to local file system files. Directory Index is also supported. Target url examples:
+  - `file:///root/foo.txt`: The `/root/foo.txt` file.
+  - `file:///D:/foo.txt` : The `D:\foo.txt` file. (Windows)
+  - `file://server/share/foo.txt`: The `\\server\share\foo.txt` file. (Windows UNC path)
+  - `file:////server/share/foo.txt` : Same as above, another form of UNC path.
+- `-enable-rclone` : Make Simplegoproxy supports `rclone://` urls, which reference to a file in [rclone](https://github.com/rclone/rclone) remote. Target url example: `rclone://remote/path/to/file.txt`, which will get the contents of `remote:path/to/file.txt` file using rclone. It lookups rclone from PATH and use default rclone config file location (`~/.config/rclone.conf`). To use other locations, use `-rclone-binary` and `-rclone-config` flags.
+  - For a regular file, it will run `rclone cat remote:path` to get file contents and output it to client.
+  - For a dir, it will run `rclone lsjson remote:path` to get file list of the dir, and output the Directory Index page to client.
+- `-enable-curl` : Make Simplegoproxy supports `curl+*://` urls, which will spawn a [curl](https://curl.se/docs/manpage.html) process to fetch the actual url. Target url example: `curl+https://ipinfo.io`. It lookups curl from PATH. To use other location, use `-curl-binary` flag.
+- `-enable-exec` : Make Simplegoproxy supports `exec://` urls, which spawn a child process and return it's stdout to client. Target url example: `exec://curl?args=-i+ipinfo.io`, which will execute `curl -i ipinfo.io`. You can also specify the full path of executable file use the same format as `file://` scheme url.
+
+For `rclone://`, `curl+*//`, `exec://` urls, if `_sgp_debug` modification parameter is set, it will output the combined stdout and stderr of spawned child process, instead of stdout only.
+
+Note some `_sgp_*` modification parameters don't work with most of above schemes urls, obviously the ones that modify http request.
 
 ## Security tips
 
 ### Set the rootpath
 
-If your Simplegoproxy instance will be publicly accessible, make sure to set the "rootpath" flag to a "confidential" value other than the default "/". It acts like a password.
+If your Simplegoproxy instance will be publicly accessible, you can set the "rootpath" flag to a "confidential" value other than the default "/". It acts like a password.
 
 E.g.: If rootpath is set to "/abc/", then the entrypoint url should be like `http://localhost:3000/abc/https://ipcfg.co/json`.
 
 ### Request signing
 
-Additional, if "key" flag is set, all requests to Simplegoproxy must be signed via HMAC-SHA256 using the key. The message being signed is the "canonical url" of the request. The result MAC (message authentication code) should be provided in `_sgp_sign` parameter of the request.
+Additional, if "key" flag is set, all requests to Simplegoproxy (except requests of `data:` urls) must be signed via HMAC-SHA256 using the key. The message being signed is the "canonical url" of the request. The result MAC (message authentication code) should be provided in `_sgp_sign` parameter of the request.
 
 The "canonical url" is the target url with all `_sgp_*` modification parameters (excluding `_sgp_sign` and `_sgp_keytype`) in query values. All query values sorted by key.
 
-To calculate the `_sgp_sign` value of a target url, run `simplegoproxy` with `-sign` flag. E.g.:
+It's recommended to use the "Admin UI" to sign a target url and get the signed entrypoint url.
+
+You can also calculate the sign of a target url using CLI by running `simplegoproxy` with `-sign` flag. E.g.:
 
 ```
 #simplegoproxy -sign -key abc "https://ipinfo.io/ip?_sgp_cors"
@@ -197,6 +235,8 @@ simplegoproxy -sign -key abc -publicurl "http://localhost:3000" "https://ipinfo.
 https://ipinfo.io/ip?_sgp_cors=  http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors=
 ```
 
+Note the `data:` urls does not need signing, as they do not actually send any network request or have any side effect.
+
 ### Admin UI Authorization
 
 If request signing is enabled, the admin UI will require http basic authorization:
@@ -209,6 +249,8 @@ If request signing is enabled, the admin UI will require http basic authorizatio
 If request signing is enabled, all `__SECRET_**__` style substrings in modification parameter value or normal query variable will be replaced with the value of the corresponding `SECRET_**` environment variable, if it exists, when sending request to the target url.
 
 The substitutions occur after the request signing verification.
+
+Note `data:` urls does NOT support secret substitutions.
 
 ### Signing key type
 

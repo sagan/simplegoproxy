@@ -38,10 +38,11 @@ const (
 	TIMEOUT_STRING         = "timeout"
 	INSECURE_STRING        = "insecure"
 	COOKIE_STRING          = "cookie"
-	BASICAUTH_STRING       = "basicauth"
+	USER_STRING            = "user"
 	FDHEADERS_STRING       = "fdheaders"
 	BODY_STRING            = "body"
 	TYPE_STRING            = "type"
+	RESTYPE_STRING         = "restype"
 	METHOD_STRING          = "method"
 	REFERER_STRING         = "referer"
 	ORIGIN_STRING          = "origin"
@@ -50,6 +51,9 @@ const (
 	KEYTYPE_STRING         = "keytype"
 	VALIDBEFORE_STRING     = "validbefore"
 	VALIDAFTER_STRING      = "validafter"
+	DEBUG_STRING           = "debug"
+	ARG_SRING              = "arg"
+	ARGS_SRING             = "args"
 )
 
 var (
@@ -66,8 +70,8 @@ func sendError(w http.ResponseWriter, msg string, args ...any) {
 	w.Write([]byte(fmt.Sprintf(msg, args...)))
 }
 
-func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string, keytypeBlacklist []string,
-	doLog, enableUnix, enableFile bool, enableRclone bool, rcloneBinary string, rcloneConfig string) {
+func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist []string, doLog bool,
+	enableUnix, enableFile, enableRclone, enableCurl, enableExec bool, rcloneBinary, rcloneConfig, curlBinary string) {
 	defer r.Body.Close()
 	targetUrl := r.URL.EscapedPath()
 	var modparams url.Values
@@ -120,28 +124,41 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string
 	if doLog {
 		log.Printf("Fetch: url=%s, params=%v, src=%s", targetUrlObj, queryParams, r.RemoteAddr)
 	}
-	switch targetUrlObj.Scheme {
-	case "unix":
-		if !enableUnix {
-			sendError(w, "unix domain socket is not enabled")
+	if strings.HasPrefix(targetUrlObj.Scheme, "curl+") && len(targetUrlObj.Scheme) > 5 {
+		if !enableCurl {
+			sendError(w, "curl url is not enabled")
 			return
 		}
-	case "file":
-		if !enableFile {
-			sendError(w, "file url is not enabled")
+	} else {
+		switch targetUrlObj.Scheme {
+		case "unix":
+			if !enableUnix {
+				sendError(w, "unix domain socket is not enabled")
+				return
+			}
+		case "file":
+			if !enableFile {
+				sendError(w, "file url is not enabled")
+				return
+			}
+		case "rclone":
+			if !enableRclone {
+				sendError(w, "rclone url is not enabled")
+				return
+			}
+		case "exec":
+			if !enableExec {
+				sendError(w, "exec url is not enabled")
+				return
+			}
+		case "http", "https", "data": // do nothing
+		default:
+			sendError(w, "unsupported url scheme %q", targetUrlObj.Scheme)
 			return
 		}
-	case "rclone":
-		if !enableRclone {
-			sendError(w, "rclone url is not enabled")
-			return
-		}
-	case "http", "https", "data": // do nothing
-	default:
-		sendError(w, "unsupported url schema %q", targetUrlObj.Scheme)
-		return
 	}
-	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist, rcloneBinary, rcloneConfig)
+	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key,
+		keytypeBlacklist, rcloneBinary, rcloneConfig, doLog)
 	if err != nil {
 		sendError(w, "Failed to fetch url: %v", err)
 		return
@@ -156,8 +173,8 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix string, key string
 	io.Copy(w, response.Body)
 }
 
-func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
-	prefix, signkey string, keytypeBlacklist []string, rcloneBinary, rcloneConfig string) (*http.Response, error) {
+func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, prefix, signkey string,
+	keytypeBlacklist []string, rcloneBinary, rcloneConfig string, doLog bool) (*http.Response, error) {
 	header := http.Header{}
 	responseHeaders := map[string]string{}
 	subs := map[string]string{}
@@ -167,14 +184,16 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 	nocsp := false
 	nocache := false
 	norf := false // no redirect following
+	debug := false
 	proxy := ""
 	impersonate := ""
 	timeout := 0
 	cookie := ""
-	basicauth := ""
+	user := ""
 	fdheaders := ""
 	body := ""
 	contentType := ""
+	responseContentType := ""
 	method := http.MethodGet
 	keytype := ""
 	sign := ""
@@ -188,6 +207,10 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			value = applySecrets(value)
 		}
 		switch key {
+		case ARG_SRING, ARGS_SRING:
+			// do nothing
+		case DEBUG_STRING:
+			debug = true
 		case CORS_STRING:
 			cors = true
 		case INSECURE_STRING:
@@ -206,8 +229,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			impersonate = value
 		case COOKIE_STRING:
 			cookie = value
-		case BASICAUTH_STRING:
-			basicauth = value
+		case USER_STRING:
+			user = value
 		case METHOD_STRING:
 			method = strings.ToUpper(value)
 		case FDHEADERS_STRING:
@@ -216,6 +239,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			body = value
 		case TYPE_STRING:
 			contentType = value
+		case RESTYPE_STRING:
+			responseContentType = value
 		case KEYTYPE_STRING:
 			keytype = value
 		case SCOPE_STRING:
@@ -322,17 +347,17 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			}
 		}
 		if urlObj.User != nil {
-			basicauth = urlObj.User.String()
+			user = urlObj.User.String()
 			urlObj.User = nil
 		}
 		if cookie != "" {
 			header.Set("Cookie", cookie)
 		}
-		if basicauth != "" {
-			header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(basicauth)))
+		if user != "" {
+			header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user)))
 		}
 		if contentType != "" {
-			header.Set("Content-Type", contentType)
+			header.Set("Content-Type", util.Mime(contentType))
 		}
 		if header.Get("Content-Type") == "" && method == http.MethodPost && body != "" {
 			header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -391,11 +416,12 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 		if body != "" {
 			reqBody = strings.NewReader(body)
 		}
-		req, err := http.NewRequest(method, urlStr, reqBody)
+		req, err := http.NewRequestWithContext(srReq.Context(), method, urlStr, reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("invalid http request: %v", err)
 		}
 		req.Header = header
+		username, password, _ := strings.Cut(user, ":")
 		res, err = util.FetchUrl(&util.NetRequest{
 			Req:          req,
 			Impersonate:  impersonate,
@@ -405,6 +431,11 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 			Norf:         norf,
 			RcloneBinary: rcloneBinary,
 			RcloneConfig: rcloneConfig,
+			Debug:        debug,
+			Username:     username,
+			Password:     password,
+			DoLog:        doLog,
+			Params:       queryParams,
 		})
 		if err != nil {
 			return res, err
@@ -439,6 +470,9 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values,
 		} else {
 			res.Header.Del(key)
 		}
+	}
+	if responseContentType != "" {
+		res.Header.Set("Content-Type", util.Mime(responseContentType))
 	}
 	if len(subs) > 0 {
 		doSub := forcesub
@@ -503,7 +537,7 @@ func Generate(targetUrl, key, publicurl, prefix string) (canonicalurl string, si
 			urlObj.Path = "/"
 		} else if (urlObj.Scheme == "http" || urlObj.Scheme == "https") && urlObj.Host == "" &&
 			!strings.Contains(urlObj.Path, "/") {
-			// "ipinfo.io" => schema=, host=, path=ipinfo.io . So add a root path.
+			// "ipinfo.io" => scheme=, host=, path=ipinfo.io . So add a root path.
 			urlObj.Path += "/"
 		}
 		urlQuery := urlObj.Query()
