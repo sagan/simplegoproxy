@@ -9,5 +9,5 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=build /go/src/sgp/simplegoproxy .
 RUN chmod a+x /app/simplegoproxy
-EXPOSE 3000
+EXPOSE 8380
 CMD ["/app/simplegoproxy"]

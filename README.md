@@ -1,4 +1,4 @@
-# simplegoproxy
+## simplegoproxy
 
 Simplegoproxy is a http / API proxy that can, and is designed and intended to be used to modify the http request headers, response headers and / or response body on the fly, based on custom rules per request, and then return the modified response to the user.
 
@@ -10,6 +10,29 @@ Use cases:
 - Add "Authorization" or other headers to the request.
 - Apply string replacements on the response body.
 
+TOC
+
+- [simplegoproxy](#simplegoproxy)
+- [Run](#run)
+- [Usage](#usage)
+- [Modification parameters](#modification-parameters)
+- [Other features](#other-features)
+  - [Modification parameters fronting](#modification-parameters-fronting)
+  - [Impersonate the Browser](#impersonate-the-browser)
+  - [Admin UI](#admin-ui)
+  - ["data:" urls](#data-urls)
+  - [`unix://`, `file://`, `rclone://`, `curl+*//`, `exec://` urls](#unix-file-rclone-curl-exec-urls)
+- [Security features](#security-features)
+  - [Set the rootpath](#set-the-rootpath)
+  - [Request signing](#request-signing)
+  - [Admin UI Authorization](#admin-ui-authorization)
+  - [Secret substitutions](#secret-substitutions)
+  - [Signing key type](#signing-key-type)
+  - [Scope signing](#scope-signing)
+  - [Open scopes](#open-scopes)
+  - [Referer restrictions](#referer-restrictions)
+  - [Origin restrictions](#origin-restrictions)
+
 ## Run
 
 Simplegoproxy is written in Go and published as a single executable file which requires no mandatory argument.
@@ -17,7 +40,7 @@ Simplegoproxy is written in Go and published as a single executable file which r
 You can also run it using Docker:
 
 ```
-docker run --name sgp -p 3000:3000 -d \
+docker run --name sgp -p 8380:8380 -d \
   ghcr.io/sagan/simplegoproxy
 ```
 
@@ -48,10 +71,14 @@ Command-line flag arguments:
         Comma-separated list of blacklisted keytypes
   -log
         Log every request urls
+  -open-http
+        Used with request signing, make all http(s) urls do not require signing
+  -open-scope value
+        Used with request signing. Array list. Public scopes that urls of these scopes do not require signing. E.g. "http://example.com/*"
   -pass string
         Password of admin UI. If not set, the "key" will be used
   -port int
-        Http listening port (default 3000)
+        Http listening port (default 8380)
   -prefix string
         Prefix of settings in query parameters (default "_sgp_")
   -publicurl string
@@ -68,23 +95,23 @@ Command-line flag arguments:
         Username of admin UI (Admin UI is available at "/admin" path) (default "root")
 ```
 
-All arguments are optional, and can also be set by environment variable. The environment variable name is the flag name in uppercase and replacing `-` with `_`. E.g.: `port` flag can be set using `PORT` env; `enable-file` flag can be set using `ENABLE_FILE` env. To set a boolean (toggle) flag, use `true` of `false` env value.
+All arguments are optional, and can also be set by environment variable. The environment variable name is the `SGP_` prefix concating flag name in uppercase and replacing `-` with `_`. E.g.: `port` flag can be set using `SGP_PORT` env; `enable-file` flag can be set using `SGP_ENABLE_FILE` env. To set a boolean (toggle) flag, use `true` of `false` env value.
 
 ## Usage
 
 Append the target url to the root path to generate the "entrypoint url". E.g.: (Assume Simplegoproxy is started with the default "/' root path):
 
 ```
-curl -i "localhost:3000/https://ipcfg.co/json"
+curl -i "localhost:8380/https://ipcfg.co/json"
 
 # The scheme:// part of target url can be omitted, in which case "https://" is assumed
-curl -i "localhost:3000/ipcfg.co/json"
+curl -i "localhost:8380/ipcfg.co/json"
 ```
 
 The "entrypoint url" accepts GET requests only. By default it will just fetch the "target url" and return the original response, without any modification. Add specic query parameters to set the modification rules. E.g.:
 
 ```
-curl -i "localhost:3000/https://ipcfg.co/json?_sgp_cors"
+curl -i "localhost:8380/https://ipcfg.co/json?_sgp_cors"
 ```
 
 The `_sgp_cors` modification parameter indicates Simplegoproxy to modify the original response headers to set the CORS-allow-all headers:
@@ -126,7 +153,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
 - `_sgp_validbefore=<value>`, `_sgp_validafter=<value>` : If set, the entrypoint url can only be used before or after this time accordingly. Value can be any of below time formats: `2006-01-02`, `2006-01-02T15:04:05` `2006-01-02T15:04:05-07:00`, `2006-01-02T15:04:05Z`. All but the last format are parsed in local timezone. The last one are parsed as UTC time. Note to enforce these restrictions, "Request signing" must be enabled.
 
-Modification paramaters are set in Query Variables. All `_sgp_*` parameters are stripped from the target url when Simplegoproxy fetch it. E.g.: the `http://localhost:3000/https://ipcfg.co/json?abc=1&_sgp_cors` entry will actually fetch the `https://ipcfg.co/json?abc=1` target url.
+Modification paramaters are set in Query Variables. All `_sgp_*` parameters are stripped from the target url when Simplegoproxy fetch it. E.g.: the `http://localhost:8380/https://ipcfg.co/json?abc=1&_sgp_cors` entry will actually fetch the `https://ipcfg.co/json?abc=1` target url.
 
 All "escapable" characters in paramater name & value should be escaped in '%XX' format. (In general, the "escapable" means JavaScript's `encodeURIComponent` function return a escaped string for the char)
 
@@ -137,7 +164,7 @@ All "escapable" characters in paramater name & value should be escaped in '%XX' 
 Instead of using Query Variables to set modification parameters, You can also put them in the "path", after the root path but before the target url. E.g.:
 
 ```
-http://localhost:3000/_sgp_cors/https://ipcfg.co/json
+http://localhost:8380/_sgp_cors/https://ipcfg.co/json
 ```
 
 ### Impersonate the Browser
@@ -145,7 +172,7 @@ http://localhost:3000/_sgp_cors/https://ipcfg.co/json
 Simplegoproxy can impersonate itself as Browser when sending http request to target url. It's similar to what [curl-impersonate](https://github.com/lwthiker/curl-impersonate) does. To enable this, set the `_sgp_impersonate` modification parameter to target browser name. E.g.:
 
 ```
-http://localhost:3000/_sgp_impersonate=chrome120/https://ipcfg.co/json
+http://localhost:8380/_sgp_impersonate=chrome120/https://ipcfg.co/json
 ```
 
 Simplegoproxy will print the list of supported targets when starting. Currently supported impersonates:
@@ -155,7 +182,7 @@ Simplegoproxy will print the list of supported targets when starting. Currently 
 
 ### Admin UI
 
-Simplegoproxy provides a http admin UI at `/admin/` path, e.g. `http://localhost:3000/admin/` . The admin UI allow users to generate entrypoint url for a target url and view history records of generated entrypoint urls. All data are stored in the browser local storage.
+Simplegoproxy provides a http admin UI at `/admin/` path, e.g. `http://localhost:8380/admin/` . The admin UI allow users to generate entrypoint url for a target url and view history records of generated entrypoint urls. All data are stored in the browser local storage.
 
 ### "data:" urls
 
@@ -164,9 +191,9 @@ Simplegoproxy supports `data:` urls ([Data URLs](https://developer.mozilla.org/e
 E.g.
 
 ```
-http://localhost:3000/data:,Hello%2C%20World%21
+http://localhost:8380/data:,Hello%2C%20World%21
 
-http://localhost:3000/data:text/html;base64,SGVsbG8sIFdvcmxkIQ==
+http://localhost:8380/data:text/html;base64,SGVsbG8sIFdvcmxkIQ==
 ```
 
 Both of above entrypoint urls will output "Hello, World!". The later one will also set the `Content-Type: text/html` response header.
@@ -191,13 +218,13 @@ For `rclone://`, `curl+*//`, `exec://` urls, if `_sgp_debug` modification parame
 
 Note some `_sgp_*` modification parameters don't work with most of above schemes urls, obviously the ones that modify http request.
 
-## Security tips
+## Security features
 
 ### Set the rootpath
 
 If your Simplegoproxy instance will be publicly accessible, you can set the "rootpath" flag to a "confidential" value other than the default "/". It acts like a password.
 
-E.g.: If rootpath is set to "/abc/", then the entrypoint url should be like `http://localhost:3000/abc/https://ipcfg.co/json`.
+E.g.: If rootpath is set to "/abc/", then the entrypoint url should be like `http://localhost:8380/abc/https://ipcfg.co/json`.
 
 ### Request signing
 
@@ -219,20 +246,20 @@ It outputs the canonical url of the request along with calculated sign.
 Then use the following entrypoint url :
 
 ```
-http://localhost:3000/https://ipinfo.io/ip?_sgp_cors&_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef
+http://localhost:8380/https://ipinfo.io/ip?_sgp_cors&_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef
 
 # or
-http://localhost:3000/_sgp_cors&_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip
+http://localhost:8380/_sgp_cors&_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip
 
 # or
-http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors
+http://localhost:8380/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors
 ```
 
-If you pass a `-publicurl http://localhost:3000` flag when invoking the above command, it outputs the final entry url diretly:
+If you pass a `-publicurl http://localhost:8380` flag when invoking the above command, it outputs the final entry url diretly:
 
 ```
-simplegoproxy -sign -key abc -publicurl "http://localhost:3000" "https://ipinfo.io/ip?_sgp_cors"
-https://ipinfo.io/ip?_sgp_cors=  http://localhost:3000/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors=
+simplegoproxy -sign -key abc -publicurl "http://localhost:8380" "https://ipinfo.io/ip?_sgp_cors"
+https://ipinfo.io/ip?_sgp_cors=  http://localhost:8380/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors=
 ```
 
 Note the `data:` urls does not need signing, as they do not actually send any network request or have any side effect.
@@ -259,13 +286,13 @@ It's possible to provide a optional "key type" value whening signing a url. The 
 To sign a url, set a `-keytype string` flag:
 
 ```
-simplegoproxy -key abc -keytype one -sign -publicurl http://localhost:3000 ipinfo.io
+simplegoproxy -key abc -keytype one -sign -publicurl http://localhost:8380 ipinfo.io
 ```
 
 Output:
 
 ```
-https://ipinfo.io/  http://localhost:3000/_sgp_keytype=one&_sgp_sign=94bb9904ac8975e1dc3617ca49a9ed4481d7db6626859978dddcd29c3999d3f0/https://ipinfo.io/
+https://ipinfo.io/  http://localhost:8380/_sgp_keytype=one&_sgp_sign=94bb9904ac8975e1dc3617ca49a9ed4481d7db6626859978dddcd29c3999d3f0/https://ipinfo.io/
 ```
 
 The generated entrypoint url will have the `_sgp_keytype` parameter with same value.
@@ -285,7 +312,7 @@ If any none-empty `_sgp_scope` parameter is provided, the sign is calculated aga
 E.g.:
 
 ```
-localhost:3000/_sgp_scope=https%3A%2F%2F%2A%2F%2A/ipinfo.io/ip
+localhost:8380/_sgp_scope=https%3A%2F%2F%2A%2F%2A/ipinfo.io/ip
 ```
 
 Here, the `_sgp_scope` is `https://*/*` , which matches all https URLs. The payload ("canonical target url") of scope signing is a `?` character plus all `_sgp_` parameters sorted by key. To calculate it:
@@ -298,13 +325,29 @@ edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410716bc9d7041e64c715 ?_sgp_scope=htt
 Then use the following entrypoint url:
 
 ```
-curl -i "localhost:3000/_sgp_sign=edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410716bc9d7041e64c715&_sgp_scope=https%3A%2F%2F%2A%2F%2A/ipinfo.io/ip"
+curl -i "localhost:8380/_sgp_sign=edb3aaafe81cc42ea94a862bb5b77b4876d39ab3748410716bc9d7041e64c715&_sgp_scope=https%3A%2F%2F%2A%2F%2A/ipinfo.io/ip"
 ```
 
 Notes:
 
 - The `_sgp_scope` parameter can be set multiple times. The sign can be used to access any target URL which matches with at least one provided scope.
 - A `*` scheme in scope parameter means "http" or "https". E.g. the `*://*/*` scope matches with all "http://" or "https://" urls. If you want to target other schemes like "file" ("file://" url) as well, you must put it in explicitly.
+
+### Open scopes
+
+When request signing is used, you can define some "open scopes" using `-open-scope string` flags. E.g.:
+
+```
+-open-scope "http://example.com/*"
+```
+
+This flag can be set multiple times. Target urls of these scopes do not require (enforce) signing. However, secret substitutions will not work if a such scope url is not signed. For convenience, `-open-http` flag can be used to make all http(s) urls do not require signing, equivalent to `-open-scope "*://*"`.
+
+Example:
+
+```
+simplegoproxy -enable-all -key abc -open-http
+```
 
 ### Referer restrictions
 

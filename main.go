@@ -26,7 +26,7 @@ func main() {
 		if flagsSet[f.Name] {
 			return
 		}
-		envname := strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
+		envname := "SGP_" + strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
 		if envValue := os.Getenv(envname); envValue != "" {
 			err := f.Value.Set(envValue)
 			if err != nil {
@@ -41,6 +41,12 @@ func main() {
 		flags.EnableCurl = true
 		flags.EnableExec = true
 	}
+	if flags.OpenHttp {
+		flags.OpenScopes = append(flags.OpenScopes, "*://*")
+	}
+	if flags.Key == "" && len(flags.OpenScopes) > 0 {
+		log.Fatalf(`The "open-http" and "open-scope" flags must be used with "key" flag`)
+	}
 	if !strings.HasPrefix(flags.Rootpath, "/") {
 		flags.Rootpath = "/" + flags.Rootpath
 	}
@@ -53,7 +59,6 @@ func main() {
 	} else if flags.Key == "" {
 		log.Fatalf(`The "pass" flag must be used with "key" flag`)
 	}
-
 	if flags.Sign {
 		if flags.Key == "" || len(args) == 0 {
 			log.Fatalf("The signkey flag and at least one argument (url) must be provided")
@@ -74,20 +79,26 @@ func main() {
 	}
 
 	adminPath := flags.Rootpath + "admin/"
-	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s, prefix=%s, key=%s\n",
-		version.Version, flags.Port, flags.Rootpath, flags.Prefix, flags.Key)
+	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s, prefix=%s, signing_enabled=%t\n",
+		version.Version, flags.Port, flags.Rootpath, flags.Prefix, flags.Key != "")
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
 	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t, curl=%t, exec=%t\n",
 		flags.EnableFile, flags.EnableUnix, flags.EnableRclone, flags.EnableCurl, flags.EnableExec)
 	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(proxy.TEXTUAL_MIMES, ", "))
 	fmt.Printf("Blacklist keytypes: %v\n", flags.KeytypeBlacklist)
 	fmt.Printf("Admin Web UI at %q with user/pass: %s:%s\n", adminPath, flags.User, flags.Pass)
+	if len(flags.OpenScopes) > 0 {
+		fmt.Printf("Open scopes: %v\n", flags.OpenScopes)
+	}
 	fmt.Printf("simplegoproxy is a open source software. See: https://github.com/sagan/simplegoproxy\n")
 	fmt.Printf("\n")
+	if flags.Key == "" && (flags.EnableFile || flags.EnableUnix || flags.EnableRclone || flags.EnableCurl || flags.EnableExec) {
+		fmt.Printf("WARNING! Enabing non-http schemes without using signing is risky. You should only do it in local / test / sandbox env\n")
+	}
 
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.Log, flags.EnableUnix,
-			flags.EnableFile, flags.EnableRclone, flags.EnableCurl, flags.EnableExec,
+		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.OpenScopes, flags.Log,
+			flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl, flags.EnableExec,
 			flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary)
 	}))
 	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())

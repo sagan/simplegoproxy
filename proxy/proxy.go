@@ -70,7 +70,7 @@ func sendError(w http.ResponseWriter, msg string, args ...any) {
 	w.Write([]byte(fmt.Sprintf(msg, args...)))
 }
 
-func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist []string, doLog bool,
+func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist, openScopes []string, doLog bool,
 	enableUnix, enableFile, enableRclone, enableCurl, enableExec bool, rcloneBinary, rcloneConfig, curlBinary string) {
 	defer r.Body.Close()
 	// For now, entrypoint url self only allows GET alike methods.
@@ -165,7 +165,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		}
 	}
 	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key,
-		keytypeBlacklist, rcloneBinary, rcloneConfig, doLog)
+		keytypeBlacklist, openScopes, rcloneBinary, rcloneConfig, doLog)
 	if err != nil {
 		sendError(w, "Failed to fetch url: %v", err)
 		return
@@ -185,7 +185,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 }
 
 func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, prefix, signkey string,
-	keytypeBlacklist []string, rcloneBinary, rcloneConfig string, doLog bool) (*http.Response, error) {
+	keytypeBlacklist, openScopes []string, rcloneBinary, rcloneConfig string, doLog bool) (*http.Response, error) {
 	header := http.Header{}
 	responseHeaders := map[string]string{}
 	subs := map[string]string{}
@@ -196,6 +196,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	nocache := false
 	norf := false // no redirect following
 	debug := false
+	// current url does not require (enforce) signing, but will disable env secret if not signed
+	openMode := util.MatchUrlPatterns(openScopes, urlObj.String(), false)
 	proxy := ""
 	impersonate := ""
 	timeout := 0
@@ -214,7 +216,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	now := time.Now().Unix()
 	for key, values := range queryParams {
 		value := values[0]
-		if signkey != "" {
+		if signkey != "" && !openMode {
 			value = applySecrets(value)
 		}
 		switch key {
@@ -324,37 +326,38 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			}
 			urlObj.RawQuery = signUrlQuery.Encode()
 			signUrl := urlObj.String()
-			if sign == "" {
-				return nil, fmt.Errorf(`sign is required but not found`)
-			}
-			if len(scopes) > 0 {
-				targetUrlQuery := url.Values{}
-				for key, values := range signUrlQuery {
-					if !strings.HasPrefix(key, prefix) {
-						signUrlQuery.Del(key)
-						targetUrlQuery[key] = values
+			if sign != "" {
+				if len(scopes) > 0 {
+					targetUrlQuery := url.Values{}
+					for key, values := range signUrlQuery {
+						if !strings.HasPrefix(key, prefix) {
+							signUrlQuery.Del(key)
+							targetUrlQuery[key] = values
+						}
+					}
+					urlObj.RawQuery = targetUrlQuery.Encode()
+					signUrl = "?" + signUrlQuery.Encode()
+					if targetUrl := urlObj.String(); !util.MatchUrlPatterns(scopes, targetUrl, false) {
+						return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
 					}
 				}
-				urlObj.RawQuery = targetUrlQuery.Encode()
-				signUrl = "?" + signUrlQuery.Encode()
-				if targetUrl := urlObj.String(); !util.MatchUrlPatterns(scopes, targetUrl, false) {
-					return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
+				if keytype != "" {
+					if slices.Contains(keytypeBlacklist, keytype) {
+						return nil, fmt.Errorf("keytype %q is revoked", keytype)
+					}
 				}
-			}
-			if keytype != "" {
-				if slices.Contains(keytypeBlacklist, keytype) {
-					return nil, fmt.Errorf("keytype %q is revoked", keytype)
+				messageMAC, err := hex.DecodeString(sign)
+				if err != nil {
+					return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
 				}
-			}
-			messageMAC, err := hex.DecodeString(sign)
-			if err != nil {
-				return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
-			}
-			mac := hmac.New(sha256.New, []byte(Realkey(signkey, keytype)))
-			mac.Write([]byte(signUrl))
-			expectedMAC := mac.Sum(nil)
-			if !hmac.Equal(messageMAC, expectedMAC) {
-				return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
+				mac := hmac.New(sha256.New, []byte(Realkey(signkey, keytype)))
+				mac.Write([]byte(signUrl))
+				expectedMAC := mac.Sum(nil)
+				if !hmac.Equal(messageMAC, expectedMAC) {
+					return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
+				}
+			} else if !openMode {
+				return nil, fmt.Errorf(`sign is required but not found`)
 			}
 		}
 		if urlObj.User != nil {
@@ -393,7 +396,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			header[h] = srReq.Header[h]
 		}
 
-		if signkey != "" {
+		if signkey != "" && !openMode {
 			// only do secret substitution if request signing is enabled
 			urlQuery := urlObj.Query()
 			for key, values := range urlQuery {
