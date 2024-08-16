@@ -11,6 +11,7 @@ interface InputForm {
   nocsp: boolean;
   fdua: boolean;
   fdauth: boolean;
+  debug: boolean;
   addon: string;
   scope: string;
   timeout: number;
@@ -100,6 +101,14 @@ export default function Home({}) {
               {...register("fdauth")}
             />
             &nbsp;Forward Auth
+          </label>
+          <label title="Debug mode">
+            <input
+              defaultChecked={!!searchParams.get("debug")}
+              type="checkbox"
+              {...register("debug")}
+            />
+            &nbsp;Debug
           </label>
           <label>
             timeout:&nbsp;

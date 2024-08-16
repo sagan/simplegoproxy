@@ -89,9 +89,10 @@ func (rfb *RangesFile) SetHeader(header http.Header) {
 }
 
 // Reference: https://stackoverflow.com/questions/18315787/http-1-1-response-to-multiple-range .
-// Return the body that will read from f according to ranges, which is parsed from http request "Range" header.
+// *RangesFile is a io.ReadCloser, which is designed to be used as the body of http response.
+// It will read from file according to ranges, which is parsed from http request "Range" header.
 // The returned body is intended to be used in http response body.
-// f will be closed then body is closed.
+// The file will be closed then body is closed.
 // Note http ranges is inclusive.
 // E.g. "Range: bytes=0-499" : first 500 bytes.
 func NewRangesFile(file *os.File, contentType string, fileSize int64, rangeHeader string) (*RangesFile, error) {

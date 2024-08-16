@@ -34,9 +34,5 @@ func (ct TimestampTime) MarshalJSON() ([]byte, error) {
 }
 
 func (ct *TimestampTime) String() string {
-	return fmt.Sprintf("%q", time.Time(*ct).Format(formats[0]))
-}
-
-func (ct *TimestampTime) Format(layout string) string {
-	return time.Time(*ct).Format(layout)
+	return fmt.Sprintf("%q", time.Time(*ct).UTC().Format(formats[0]))
 }

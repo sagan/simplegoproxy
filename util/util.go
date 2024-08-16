@@ -15,12 +15,12 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/Noooste/azuretls-client"
@@ -168,7 +168,7 @@ func fetchUnix(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse unix domain socket resource url: %v", err)
 	}
-	dummyUrl := "http://unix/" + resourceUrlObj.Path
+	dummyUrl := "http://unix/" + strings.TrimPrefix(resourceUrlObj.Path, "/")
 	if req.URL.RawQuery != "" {
 		dummyUrl += "?" + req.URL.RawQuery
 	}
@@ -233,28 +233,34 @@ func fetchFile(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("failed to open file %q: %v", localfilepath, err)
 	}
 	contentType := FileContentType(localfilepath)
-	res := &http.Response{Header: http.Header{
-		"Accept-Ranges": []string{"bytes"},
-		"Last-Modified": []string{stat.ModTime().Format(http.TimeFormat)},
-	}}
+	res := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Accept-Ranges": []string{"bytes"},
+			"Content-Type":  []string{contentType},
+			"Last-Modified": []string{stat.ModTime().UTC().Format(http.TimeFormat)},
+		},
+	}
+	if lastModified := req.Header.Get("If-Modified-Since"); lastModified != "" {
+		t, err := http.ParseTime(lastModified)
+		if err == nil && stat.ModTime().Unix() <= t.Unix() {
+			res.StatusCode = http.StatusNotModified
+			return res, nil
+		}
+	}
 	// HTTP Range Request.
 	// Reference: https://www.zeng.dev/post/2023-http-range-and-play-mp4-in-browser/ .
 	if req.Header.Get("Range") != "" {
 		rangesFile, err := NewRangesFile(file, contentType, stat.Size(), req.Header.Get("Range"))
 		if err != nil {
 			file.Close()
-			res.Header.Add("Content-Range", fmt.Sprintf("bytes */%d", stat.Size()))
-			res.StatusCode = http.StatusRequestedRangeNotSatisfiable
-			res.Body = io.NopCloser(strings.NewReader(fmt.Sprintf("err: %v", err)))
-			return res, nil
+			return errResponseInvalidRange(stat.Size()), nil
 		}
 		rangesFile.SetHeader(res.Header)
 		res.StatusCode = http.StatusPartialContent
 		res.Body = rangesFile
 	} else {
-		res.Header.Set("Content-Type", contentType)
 		res.Header.Set("Content-Length", fmt.Sprint(stat.Size()))
-		res.StatusCode = http.StatusOK
 		res.Body = file
 	}
 	return res, nil
@@ -376,7 +382,8 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 // If the child process exits before timeout with non-zero exit code, it returns error.
 // If the child process exits after timeout with none-zero exit code, there's no way to notify it to caller.
 // If combine is true, the body is the combined stdout and stderr of child process, instead of stdout only.
-// If returned err is nil, the caller is responsible to close the returned body.
+// At least one of returned body and err will be non-nil; It may return both non-nil body and err.
+// The caller is responsible to close the returned body, if not nil.
 func runProcess(ctx context.Context, binary string, args []string, timeout int,
 	combine bool) (body io.ReadCloser, err error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
@@ -411,28 +418,32 @@ func runProcess(ctx context.Context, binary string, args []string, timeout int,
 	}
 	if timeout > 0 {
 		var cmderr error
-		var cmddone atomic.Bool
+		donech := make(chan struct{})
 		go func() {
 			//cmd.Wait will close pipes so do not use it.
 			state, err := cmd.Process.Wait()
 			if err == nil && !state.Success() {
 				cmderr = &exec.ExitError{ProcessState: state}
 			}
-			cmddone.Store(true)
-		}()
-		time.Sleep(time.Second * time.Duration(timeout))
-		if cmddone.Load() && cmderr != nil {
-			buf := [10240]byte{}
-			var n int
-			if combine {
-				n, _ = combineReader.Read(buf[:])
-				combineReader.Close()
-			} else {
-				n, _ = stderr.Read(buf[:])
-				stdout.Close()
-				stderr.Close()
+			select {
+			case donech <- struct{}{}:
+			default:
 			}
-			return nil, fmt.Errorf("process err: %v\n\n%s", cmderr, string(buf[:n]))
+			close(donech)
+		}()
+		cmddone := false
+		select {
+		case <-donech:
+			cmddone = true
+		case <-time.After(time.Second * time.Duration(timeout)):
+		}
+		if cmddone && cmderr != nil {
+			if combine {
+				return combineReader, fmt.Errorf("process err: %v", cmderr)
+			} else {
+				stdout.Close()
+				return stderr, fmt.Errorf("process err: %v", cmderr)
+			}
 		}
 	}
 	if combine {
@@ -489,7 +500,7 @@ func fetchCurl(netreq *NetRequest) (res *http.Response, err error) {
 	}
 	body, err := runProcess(req.Context(), curl, args, netreq.Timeout, netreq.Debug)
 	if err != nil {
-		return nil, err
+		return errResponse(err, body), nil
 	}
 	res = &http.Response{
 		StatusCode: http.StatusOK,
@@ -518,7 +529,7 @@ func fetchExec(netreq *NetRequest) (res *http.Response, err error) {
 	}
 	body, err := runProcess(netreq.Req.Context(), localfilepath, args, netreq.Timeout, netreq.Debug)
 	if err != nil {
-		return nil, err
+		return errResponse(err, body), nil
 	}
 	res = &http.Response{
 		StatusCode: http.StatusOK,
@@ -539,7 +550,15 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		return nil, fmt.Errorf("rclone remote name is empty")
 	}
 	// req.URL: "rclone://remote/path/to/file"
-	remotePathname := strings.TrimPrefix(req.URL.Path, "/")
+	// For most rclone remotes, the canonical root path is "", not "/".
+	// However, here we use a leading "/" in path for compatibility with some remotes.
+	// rclone will internally normalize path.
+	var remotePathname string
+	if req.URL.Path == "" {
+		remotePathname = "/"
+	} else {
+		remotePathname = path.Clean(req.URL.Path)
+	}
 	remotePath := req.URL.Host + ":" + remotePathname
 
 	statargs := []string{"lsjson", "--stat", remotePath}
@@ -595,11 +614,19 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 	}
 
 	res := &http.Response{
+		StatusCode: http.StatusOK,
 		Header: http.Header{
 			"Content-Type":  []string{FileContentType(remotePath)},
-			"Last-Modified": []string{stat.ModTime.Format(http.TimeFormat)},
+			"Last-Modified": []string{time.Time(stat.ModTime).UTC().Format(http.TimeFormat)},
 			"Accept-Ranges": []string{"bytes"},
 		},
+	}
+	if lastModified := req.Header.Get("If-Modified-Since"); lastModified != "" {
+		t, err := http.ParseTime(lastModified)
+		if err == nil && time.Time(stat.ModTime).Unix() <= t.Unix() {
+			res.StatusCode = http.StatusNotModified
+			return res, nil
+		}
 	}
 	args := []string{"cat", remotePath}
 	if netreq.RcloneConfig != "" {
@@ -621,11 +648,7 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 	if req.Header.Get("Range") != "" {
 		ranges, err := range_parser.Parse(stat.Size, req.Header.Get("Range"))
 		if err != nil || len(ranges) != 1 {
-			res.StatusCode = http.StatusRequestedRangeNotSatisfiable
-			res.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", stat.Size))
-			res.Header.Set("Content-Type", "text/plain; charset=utf-8")
-			res.Body = io.NopCloser(strings.NewReader("invalid range (only single range is supported)"))
-			return res, nil
+			return errResponseInvalidRange(stat.Size), nil
 		}
 		args = append(args, "--offset", fmt.Sprint(ranges[0].Start), "--count", fmt.Sprint(ranges[0].End-ranges[0].Start+1))
 		res.StatusCode = http.StatusPartialContent
@@ -633,14 +656,13 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		res.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", ranges[0].Start, ranges[0].End, stat.Size))
 	} else {
 		res.Header.Set("Content-Length", fmt.Sprint(stat.Size))
-		res.StatusCode = http.StatusOK
 	}
 	if netreq.DoLog {
 		log.Printf("Run %s %v", rcloneBinary, args)
 	}
 	body, err := runProcess(req.Context(), rcloneBinary, args, netreq.Timeout, netreq.Debug)
 	if err != nil {
-		return nil, err
+		return errResponse(err, body), nil
 	}
 	res.Body = body
 	return res, nil
@@ -650,6 +672,16 @@ func FetchUrl(netreq *NetRequest) (*http.Response, error) {
 	if strings.HasPrefix(netreq.Req.URL.Scheme, "curl+") && len(netreq.Req.URL.Scheme) > 5 {
 		netreq.Req.URL.Scheme = netreq.Req.URL.Scheme[5:]
 		return fetchCurl(netreq)
+	}
+	if netreq.Req.URL.Scheme != "http" && netreq.Req.URL.Scheme != "https" &&
+		netreq.Req.Method != http.MethodGet && netreq.Req.Method != http.MethodHead &&
+		netreq.Req.Method != http.MethodOptions {
+		return &http.Response{
+			StatusCode: http.StatusMethodNotAllowed,
+			Header: http.Header{
+				"Allow": []string{"OPTIONS, GET, HEAD"},
+			},
+		}, nil
 	}
 	switch netreq.Req.URL.Scheme {
 	case "unix":
@@ -689,10 +721,10 @@ func getUrlPatternParts(pattern string) map[string]string {
 			"path":   "*",
 		}
 	}
-	matchScheme := `(\*|http|https|file|ftp)`
+	matchScheme := `(\*|[a-z][\+a-z0-9]*)`
 	matchHost := `(\*|(?:\*\.)?(?:[^/*]+))?`
-	matchPath := `(.*)?`
-	regex := regexp.MustCompile("^" + matchScheme + "://" + matchHost + "(/)" + matchPath + "$")
+	matchPath := `(/.*)?`
+	regex := regexp.MustCompile("^" + matchScheme + "://" + matchHost + matchPath + "$")
 	result := regex.FindStringSubmatch(pattern)
 	if result == nil {
 		return nil
@@ -700,7 +732,7 @@ func getUrlPatternParts(pattern string) map[string]string {
 	return map[string]string{
 		"scheme": result[1],
 		"host":   result[2],
-		"path":   result[4],
+		"path":   result[3],
 	}
 }
 
@@ -729,10 +761,9 @@ func CreateUrlPatternMatcher(pattern string) func(string) bool {
 	} else if parts["host"] != "" {
 		str += parts["host"]
 	}
-	if parts["path"] == "" {
-		str += "/.*"
+	if parts["path"] == "" || parts["path"] == "/" {
+		str += "(/.*)?"
 	} else if parts["path"] != "" {
-		str += "/"
 		str += regexp.MustCompile(`\\\*`).ReplaceAllString(regexp.QuoteMeta(parts["path"]), ".*")
 	}
 	str += "$"
@@ -917,4 +948,32 @@ func getArgs(queryParams url.Values) (args []string, err error) {
 		args = queryParams["arg"]
 	}
 	return args, nil
+}
+
+// Return a http 416 range not satisfiable response.
+func errResponseInvalidRange(size int64) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusRequestedRangeNotSatisfiable,
+		Header: http.Header{
+			"Content-Range": []string{fmt.Sprintf("bytes */%d", size)},
+		},
+	}
+}
+
+// Return a http response for err.
+func errResponse(err error, body io.ReadCloser) *http.Response {
+	if body != nil {
+		if err != nil {
+			body = ReadCloserWithPrefix(body, []byte(fmt.Sprintf("%v\n\n", err)))
+		}
+	} else if err != nil {
+		body = io.NopCloser(strings.NewReader(fmt.Sprint(err)))
+	}
+	return &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header: http.Header{
+			"Content-Type": []string{constants.MIME_TXT},
+		},
+		Body: body,
+	}
 }

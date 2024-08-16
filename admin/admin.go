@@ -36,13 +36,16 @@ var GetHttpHandle = func() http.Handler {
 		"ENV":      "production",
 		"VERSION":  version.Version,
 	}
-	variableRegex := regexp.MustCompile(`".*?"; //__([A-Z][_A-Z0-9]*?)__`)
+	marker := "; //__"
+	endmarker := "__"
+	variableRegex := regexp.MustCompile(`".*?"` + regexp.QuoteMeta(marker) +
+		`([A-Z][_A-Z0-9]*?)` + regexp.QuoteMeta(endmarker))
 	indexHtmlStr = variableRegex.ReplaceAllStringFunc(indexHtmlStr, func(s string) string {
-		i := strings.Index(s, "__")
-		j := strings.LastIndex(s, "__")
-		variable := s[i+2 : j]
+		i := strings.Index(s, marker)
+		j := strings.LastIndex(s, endmarker)
+		variable := s[i+len(marker) : j]
 		if value, ok := variables[variable]; ok {
-			return fmt.Sprintf(`%q; //%s`, value, s[j+2:])
+			return fmt.Sprintf(`%q%s`, value, s[i:])
 		}
 		return s
 	})

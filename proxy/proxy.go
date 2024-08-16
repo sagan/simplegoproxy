@@ -73,6 +73,13 @@ func sendError(w http.ResponseWriter, msg string, args ...any) {
 func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist []string, doLog bool,
 	enableUnix, enableFile, enableRclone, enableCurl, enableExec bool, rcloneBinary, rcloneConfig, curlBinary string) {
 	defer r.Body.Close()
+	// For now, entrypoint url self only allows GET alike methods.
+	// In the future, may accept other methods and can possibly forward request method / request body to target url.
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+		w.Header().Set("Allow", "OPTIONS, GET, HEAD")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 	targetUrl := r.URL.EscapedPath()
 	var modparams url.Values
 	// accept "_sgp_a=1/https://ipcfg.io/json" style request url
@@ -163,14 +170,18 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		sendError(w, "Failed to fetch url: %v", err)
 		return
 	}
-	defer response.Body.Close()
+	if response.Body != nil {
+		defer response.Body.Close()
+	}
 	for name, headers := range response.Header {
 		for _, header := range headers {
 			w.Header().Add(name, header)
 		}
 	}
 	w.WriteHeader(response.StatusCode)
-	io.Copy(w, response.Body)
+	if response.Body != nil {
+		io.Copy(w, response.Body)
+	}
 }
 
 func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, prefix, signkey string,
@@ -484,7 +495,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 				}
 			}
 		}
-		if doSub {
+		if doSub && res.Body != nil {
 			body, err := io.ReadAll(res.Body)
 			if err != nil {
 				res.StatusCode = 500

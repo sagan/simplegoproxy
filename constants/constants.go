@@ -2,6 +2,8 @@ package constants
 
 const DEFAULT_MIME = "application/octet-stream"
 
+const MIME_TXT = "text/plain; charset=utf-8"
+
 // Copied from Chrome file:// url dir index page.
 // Go html/template format.
 const DIR_INDEX_HTML = `<!DOCTYPE html>
@@ -245,8 +247,7 @@ function humanFileSize(size) {
 }
 </script>
 <script>
-
-	start({{.Dir}});
+	start({{js .Dir}});
 	{{if .IsRoot}}
 	{{else}}
 	onHasParentDirectory();
