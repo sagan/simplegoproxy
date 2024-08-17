@@ -79,8 +79,8 @@ func main() {
 	}
 
 	adminPath := flags.Rootpath + "admin/"
-	fmt.Printf("simplegoproxy %s start port=%d, rootpath=%s, prefix=%s, signing_enabled=%t\n",
-		version.Version, flags.Port, flags.Rootpath, flags.Prefix, flags.Key != "")
+	fmt.Printf("simplegoproxy %s starts on %s, rootpath=%s, prefix=%s, signing_enabled=%t\n",
+		version.Version, flags.Addr, flags.Rootpath, flags.Prefix, flags.Key != "")
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
 	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t, curl=%t, exec=%t\n",
 		flags.EnableFile, flags.EnableUnix, flags.EnableRclone, flags.EnableCurl, flags.EnableExec)
@@ -103,7 +103,7 @@ func main() {
 	}))
 	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244
-	err := http.ListenAndServe(fmt.Sprintf(":%d", flags.Port), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	err := http.ListenAndServe(flags.Addr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, adminPath) {
 			adminHandle.ServeHTTP(w, r)
 			return

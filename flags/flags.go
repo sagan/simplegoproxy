@@ -5,8 +5,10 @@ import (
 	"fmt"
 )
 
+const DEFAULT_PORT = 8380 // ASCII (Decimal) 'SP' (83 + 80)
+
 var (
-	Port                int
+	Addr                string
 	Sign                bool
 	Log                 bool
 	Cors                bool
@@ -44,7 +46,9 @@ func (i *ArrayFlags) Set(value string) error {
 }
 
 func init() {
-	flag.IntVar(&Port, "port", 8380, "Http listening port") // ASCII (Decimal) 'SP' (83 + 80)
+	flag.StringVar(&Addr, "addr", fmt.Sprintf("0.0.0.0:%d", DEFAULT_PORT),
+		fmt.Sprintf(`Http listening addr, e.g. "127.0.0.1:%d" or ":%d". If not set, will listen on "0.0.0.0:%d"`,
+			DEFAULT_PORT, DEFAULT_PORT, DEFAULT_PORT))
 	flag.BoolVar(&Log, "log", false, "Log every request urls")
 	flag.BoolVar(&EnableUnix, "enable-unix", false, `Enable unix domain socket url: "unix:///path/to/socket:http://server/path"`)
 	flag.BoolVar(&EnableFile, "enable-file", false, `Enable file scheme url: "file:///path/to/file"`)

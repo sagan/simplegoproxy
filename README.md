@@ -47,6 +47,8 @@ docker run --name sgp -p 8380:8380 -d \
 Command-line flag arguments:
 
 ```
+  -addr string
+        Http listening addr, e.g. "127.0.0.1:8380" or ":8380". If not set, will listen on "0.0.0.0:8380" (default "0.0.0.0:8380")
   -cors
         Set "Access-Control-Allow-Origin: *" header for admin API
   -curl-binary string
@@ -77,8 +79,6 @@ Command-line flag arguments:
         Used with request signing. Array list. Public scopes that urls of these scopes do not require signing. E.g. "http://example.com/*"
   -pass string
         Password of admin UI. If not set, the "key" will be used
-  -port int
-        Http listening port (default 8380)
   -prefix string
         Prefix of settings in query parameters (default "_sgp_")
   -publicurl string
@@ -95,7 +95,7 @@ Command-line flag arguments:
         Username of admin UI (Admin UI is available at "/admin" path) (default "root")
 ```
 
-All arguments are optional, and can also be set by environment variable. The environment variable name is the `SGP_` prefix concating flag name in uppercase and replacing `-` with `_`. E.g.: `port` flag can be set using `SGP_PORT` env; `enable-file` flag can be set using `SGP_ENABLE_FILE` env. To set a boolean (toggle) flag, use `true` of `false` env value.
+All arguments are optional, and can also be set by environment variable. The environment variable name is the `SGP_` prefix concating flag name in uppercase and replacing `-` with `_`. E.g.: `enable-file` flag can be set by setting `SGP_ENABLE_FILE=true` env.
 
 ## Usage
 

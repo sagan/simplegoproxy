@@ -20,6 +20,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install upx
+        run: sudo apt install upx -y
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           args: release --clean
