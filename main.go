@@ -16,6 +16,7 @@ import (
 )
 
 func main() {
+	var err error
 	flag.Parse()
 	args := flag.Args()
 	flagsSet := map[string]bool{}
@@ -54,6 +55,11 @@ func main() {
 		flags.Rootpath += "/"
 	}
 	flags.KeytypeBlacklist = util.SplitCsv(flags.KeytypeBlacklistStr)
+	if flags.Key != "" {
+		if flags.Cipher, err = util.GetDeterministicCipher(flags.Key); err != nil {
+			log.Fatalf("Failed to create key cipher: %v", err)
+		}
+	}
 	if flags.Pass == "" {
 		flags.Pass = flags.Key
 	} else if flags.Key == "" {
@@ -64,16 +70,26 @@ func main() {
 			log.Fatalf("The signkey flag and at least one argument (url) must be provided")
 		}
 		for _, targetUrl := range args {
-			canonicalurl, sign, entryurl := proxy.Generate(targetUrl, flags.Key, flags.PublicUrl, flags.Prefix)
-			if entryurl != "" {
-				fmt.Printf("%s  %s\n", canonicalurl, entryurl)
-			} else {
-				if flags.Keytype != "" {
-					fmt.Printf("%s  %s%s=%s  %s\n", canonicalurl, flags.Prefix, proxy.KEYTYPE_STRING, flags.Keytype, sign)
+			canonicalurl, sign, encryptedurl, entryurl, encryptedEntryurl := proxy.Generate(targetUrl, flags.Key,
+				flags.PublicUrl, flags.Prefix, flags.Cipher)
+			var display string
+			if !flags.Encrypt {
+				if entryurl != "" {
+					display = entryurl
+				} else if flags.Keytype != "" {
+					display = sign
 				} else {
-					fmt.Printf("%s  %s\n", canonicalurl, sign)
+					display = fmt.Sprintf("%s%s=%s&%s%s=%s", flags.Prefix, proxy.KEYTYPE_STRING, flags.Keytype,
+						flags.Prefix, proxy.SIGN_STRING, sign)
+				}
+			} else {
+				if entryurl != "" {
+					display = encryptedEntryurl
+				} else {
+					display = encryptedurl
 				}
 			}
+			fmt.Printf("%s  %s\n", canonicalurl, display)
 		}
 		return
 	}
@@ -97,13 +113,13 @@ func main() {
 	}
 
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.OpenScopes, flags.Log,
-			flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl, flags.EnableExec,
-			flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary)
+		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.OpenScopes, flags.SupressError,
+			flags.Log, flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl, flags.EnableExec,
+			flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher)
 	}))
 	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244
-	err := http.ListenAndServe(flags.Addr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	err = http.ListenAndServe(flags.Addr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, adminPath) {
 			adminHandle.ServeHTTP(w, r)
 			return

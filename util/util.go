@@ -3,6 +3,10 @@ package util
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -25,8 +29,10 @@ import (
 
 	"github.com/Noooste/azuretls-client"
 	"github.com/google/shlex"
+	"github.com/jxskiss/base62"
 	range_parser "github.com/quantumsheep/range-parser"
 	"github.com/sagan/simplegoproxy/constants"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 type NetRequest struct {
@@ -976,4 +982,41 @@ func errResponse(err error, body io.ReadCloser) *http.Response {
 		},
 		Body: body,
 	}
+}
+
+// Encrypt data using cipher, return base62 string of nonce+cipherdata
+func EncryptToString(cipher cipher.AEAD, plaindata []byte) (cipherstring string) {
+	nonce := make([]byte, cipher.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		panic(err.Error())
+	}
+	cipherdata := cipher.Seal(nonce, nonce, plaindata, nil)
+	data := base62.EncodeToString(cipherdata)
+	return data
+}
+
+// ciphertext should be the result of EncryptToString
+func Decrypt(cipher cipher.AEAD, ciphertext string) (plaindata []byte, err error) {
+	cipherdata, err := base62.DecodeString(ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	if len(cipherdata) < cipher.NonceSize()+16 {
+		return nil, fmt.Errorf("ciperdata too small")
+	}
+	return cipher.Open(nil, cipherdata[:cipher.NonceSize()], cipherdata[cipher.NonceSize():], nil)
+}
+
+// Get a deterministic cipher from passphrase,
+// It means the cipher key derives solely from passphrase, no salt is used.
+func GetDeterministicCipher(passphrase string) (cipher.AEAD, error) {
+	if passphrase == "" {
+		return nil, fmt.Errorf("passphrase can not be empty")
+	}
+	key := pbkdf2.Key([]byte(passphrase), nil, 1000000, 32, sha256.New)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
 }

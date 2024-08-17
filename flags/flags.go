@@ -1,6 +1,7 @@
 package flags
 
 import (
+	"crypto/cipher"
 	"flag"
 	"fmt"
 )
@@ -11,6 +12,7 @@ var (
 	Addr                string
 	Sign                bool
 	Log                 bool
+	Encrypt             bool
 	Cors                bool
 	EnableUnix          bool
 	EnableFile          bool
@@ -19,6 +21,7 @@ var (
 	EnableExec          bool
 	EnableAll           bool
 	OpenHttp            bool
+	SupressError        bool
 	RcloneBinary        string
 	RcloneConfig        string
 	CurlBinary          string
@@ -32,6 +35,8 @@ var (
 	Pass                string
 	KeytypeBlacklist    []string
 	OpenScopes          ArrayFlags // scopes that do NOT need signing
+
+	Cipher cipher.AEAD
 )
 
 type ArrayFlags []string
@@ -50,7 +55,10 @@ func init() {
 		fmt.Sprintf(`Http listening addr, e.g. "127.0.0.1:%d" or ":%d". If not set, will listen on "0.0.0.0:%d"`,
 			DEFAULT_PORT, DEFAULT_PORT, DEFAULT_PORT))
 	flag.BoolVar(&Log, "log", false, "Log every request urls")
-	flag.BoolVar(&EnableUnix, "enable-unix", false, `Enable unix domain socket url: "unix:///path/to/socket:http://server/path"`)
+	flag.BoolVar(&SupressError, "supress-error", false, "Supress error display, send a 404 to client instead")
+	flag.BoolVar(&Encrypt, "encrypt", false, `Used with "-sign", encrypt generated entrypoint url`)
+	flag.BoolVar(&EnableUnix, "enable-unix", false,
+		`Enable unix domain socket url: "unix:///path/to/socket:http://server/path"`)
 	flag.BoolVar(&EnableFile, "enable-file", false, `Enable file scheme url: "file:///path/to/file"`)
 	flag.BoolVar(&EnableRclone, "enable-rclone", false, `Enable rclone scheme url: "rclone://remote/path/to/file"`)
 	flag.BoolVar(&EnableExec, "enable-exec", false, `Enable exec scheme url: "exec:///path/to/bin?arg=foo&arg=bar"`)

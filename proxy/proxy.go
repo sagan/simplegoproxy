@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -65,28 +66,53 @@ var (
 	}
 )
 
-func sendError(w http.ResponseWriter, msg string, args ...any) {
-	w.WriteHeader(500)
-	w.Write([]byte(fmt.Sprintf(msg, args...)))
+// match with a encrypted url base62 string
+var encryptedUrlRegex = regexp.MustCompile(`^[a-zA-Z0-9]{18,}$`)
+
+func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg string, args ...any) {
+	errormsg := fmt.Sprintf(msg, args...)
+	if supress {
+		http.NotFound(w, r)
+	} else {
+		w.WriteHeader(500)
+		w.Write([]byte(errormsg))
+	}
+	if dolog {
+		log.Print(errormsg)
+	}
 }
 
-func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist, openScopes []string, doLog bool,
-	enableUnix, enableFile, enableRclone, enableCurl, enableExec bool, rcloneBinary, rcloneConfig, curlBinary string) {
+func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist, openScopes []string,
+	supressError, doLog bool, enableUnix, enableFile, enableRclone, enableCurl, enableExec bool,
+	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD) {
 	defer r.Body.Close()
-	// For now, entrypoint url self only allows GET alike methods.
-	// In the future, may accept other methods and can possibly forward request method / request body to target url.
-	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-		w.Header().Set("Allow", "OPTIONS, GET, HEAD")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+	reqUrlQuery := r.URL.Query()
 	targetUrl := r.URL.EscapedPath()
+	encryptUrlMode := false
+	if encryptedUrlRegex.MatchString(targetUrl) {
+		decrypted, err := util.Decrypt(cipher, targetUrl)
+		if err != nil {
+			sendError(w, r, supressError, doLog, "Invalid encrypted url: %v", err)
+			return
+		}
+		targetUrl = string(decrypted)
+		targetUrlObj, err := url.Parse(targetUrl)
+		if err != nil {
+			sendError(w, r, supressError, doLog, "Invalid decrypted target url: %v", err)
+			return
+		}
+		reqUrlQuery = targetUrlObj.Query()
+		targetUrlObj.RawQuery = ""
+		targetUrl = targetUrlObj.String()
+		encryptUrlMode = true
+	}
+
 	var modparams url.Values
 	// accept "_sgp_a=1/https://ipcfg.io/json" style request url
-	if strings.HasPrefix(targetUrl, prefix) {
+	if !encryptUrlMode && strings.HasPrefix(targetUrl, prefix) {
 		index := strings.Index(targetUrl, "/")
 		if index == -1 {
-			sendError(w, "Invalid url")
+			sendError(w, r, supressError, doLog, "Invalid url")
 			return
 		}
 		modparamsStr := targetUrl[:index]
@@ -94,13 +120,13 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		var err error
 		modparams, err = url.ParseQuery(modparamsStr)
 		if err != nil {
-			sendError(w, "Failed to parse modparams %s: %v", modparamsStr, err)
+			sendError(w, r, supressError, doLog, "Failed to parse modparams %s: %v", modparamsStr, err)
 			return
 		}
 	}
 	targetUrlObj, err := url.Parse(targetUrl)
 	if err != nil {
-		sendError(w, "Failed to parse url %s: %v", targetUrl, err)
+		sendError(w, r, supressError, doLog, "Failed to parse url %s: %v", targetUrl, err)
 		return
 	}
 	if targetUrlObj.Scheme == "" {
@@ -112,7 +138,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 			targetUrlObj.Path = "/"
 		}
 		targetUrlQuery := targetUrlObj.Query()
-		for key, values := range r.URL.Query() {
+		for key, values := range reqUrlQuery {
 			if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {
 				queryParams[key[len(prefix):]] = values
 			} else {
@@ -123,7 +149,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	}
 	for key, values := range modparams {
 		if !strings.HasPrefix(key, prefix) || len(key) <= len(prefix) {
-			sendError(w, "Invalid modparam %q", key)
+			sendError(w, r, supressError, doLog, "Invalid modparam %q", key)
 			return
 		}
 		queryParams[key[len(prefix):]] = values
@@ -133,41 +159,41 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	}
 	if strings.HasPrefix(targetUrlObj.Scheme, "curl+") && len(targetUrlObj.Scheme) > 5 {
 		if !enableCurl {
-			sendError(w, "curl url is not enabled")
+			sendError(w, r, supressError, doLog, "curl url is not enabled")
 			return
 		}
 	} else {
 		switch targetUrlObj.Scheme {
 		case "unix":
 			if !enableUnix {
-				sendError(w, "unix domain socket is not enabled")
+				sendError(w, r, supressError, doLog, "unix domain socket is not enabled")
 				return
 			}
 		case "file":
 			if !enableFile {
-				sendError(w, "file url is not enabled")
+				sendError(w, r, supressError, doLog, "file url is not enabled")
 				return
 			}
 		case "rclone":
 			if !enableRclone {
-				sendError(w, "rclone url is not enabled")
+				sendError(w, r, supressError, doLog, "rclone url is not enabled")
 				return
 			}
 		case "exec":
 			if !enableExec {
-				sendError(w, "exec url is not enabled")
+				sendError(w, r, supressError, doLog, "exec url is not enabled")
 				return
 			}
 		case "http", "https", "data": // do nothing
 		default:
-			sendError(w, "unsupported url scheme %q", targetUrlObj.Scheme)
+			sendError(w, r, supressError, doLog, "unsupported url scheme %q", targetUrlObj.Scheme)
 			return
 		}
 	}
 	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key,
 		keytypeBlacklist, openScopes, rcloneBinary, rcloneConfig, doLog)
 	if err != nil {
-		sendError(w, "Failed to fetch url: %v", err)
+		sendError(w, r, supressError, doLog, "Failed to fetch url: %v", err)
 		return
 	}
 	if response.Body != nil {
@@ -535,7 +561,8 @@ func Realkey(key, keytype string) string {
 	return key
 }
 
-func Generate(targetUrl, key, publicurl, prefix string) (canonicalurl string, sign, entryurl string) {
+func Generate(targetUrl, key, publicurl, prefix string,
+	cipher cipher.AEAD) (canonicalurl string, sign, encryptedurl, entryurl, encryptedEntryurl string) {
 	urlObj, err := url.Parse(targetUrl)
 	signstr := ""
 	sgpQuery := url.Values{}
@@ -608,6 +635,15 @@ func Generate(targetUrl, key, publicurl, prefix string) (canonicalurl string, si
 					entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
 						prefix, SIGN_STRING, sign, canonicalurl)
 				}
+			}
+		}
+		if cipher != nil {
+			if canonicalurlObj, err := url.Parse(canonicalurl); err == nil {
+				query := canonicalurlObj.Query()
+				query.Set(prefix+SIGN_STRING, sign)
+				canonicalurlObj.RawQuery = query.Encode()
+				encryptedurl = util.EncryptToString(cipher, []byte(canonicalurlObj.String()))
+				encryptedEntryurl = strings.TrimSuffix(publicurl, "/") + "/" + encryptedurl
 			}
 		}
 	} else if publicurl != "" {

@@ -97,3 +97,25 @@ func TestMatchUrlPattern(t *testing.T) {
 		}
 	}
 }
+
+func TestEncryptDecrypt(t *testing.T) {
+	pass := "abc"
+	encryptCipher, err := GetDeterministicCipher(pass)
+	if err != nil {
+		t.Fatalf("Failed to get encrypt cipher: %v", err)
+	}
+	str := "In God We Trust"
+	cipherstring := EncryptToString(encryptCipher, []byte(str))
+
+	decryptCipher, err := GetDeterministicCipher(pass)
+	if err != nil {
+		t.Fatalf("Failed to get decrypt cipher: %v", err)
+	}
+	decryptedData, err := Decrypt(decryptCipher, cipherstring)
+	if err != nil {
+		t.Fatalf("Failed to decrypt: %v", err)
+	}
+	if str != string(decryptedData) {
+		t.Fatalf("Decrypted data not correct")
+	}
+}

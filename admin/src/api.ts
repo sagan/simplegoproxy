@@ -1,6 +1,7 @@
 interface Generate {
   url: string;
   entryurl: string;
+  encrypted_entryurl: string;
   sign: string;
 }
 

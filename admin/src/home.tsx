@@ -32,12 +32,12 @@ export default function Home({}) {
   );
   let [searchParams, setSearchParams] = useSearchParams();
   const [copiedIndex, setCopiedIndex] = useState(-1);
+  let encrypt = !!searchParams.get("encrypt");
   return (
     <>
       <form
         onSubmit={handleSubmit(async (data: InputForm) => {
-          setSearchParams(serializeInputForm(data));
-
+          setSearchParams(serializeInputForm(data, encrypt));
           if (data.url == "") {
             return;
           }
@@ -64,8 +64,21 @@ export default function Home({}) {
             type="search"
             className="flex-1"
             placeholder="url"
+            autoFocus
             {...register("url")}
           />
+          <label title="Encrypt generated entrypoint url">
+            <input
+              checked={encrypt}
+              type="checkbox"
+              onChange={(e) => {
+                setSearchParams(
+                  serializeInputForm(getValues(), e.target.checked)
+                );
+              }}
+            />
+            &nbsp;Encrypt
+          </label>
           <button type="submit">Generate</button>
           <button type="reset">Reset</button>
         </p>
@@ -170,6 +183,10 @@ export default function Home({}) {
           <tbody>
             {urls.map((url, i) => {
               let index = urls.length - i;
+              let accessurl = url.entryurl;
+              if (encrypt && url.encrypted_entryurl != "") {
+                accessurl = url.encrypted_entryurl;
+              }
               return (
                 <tr key={i}>
                   <td>{index}</td>
@@ -177,13 +194,13 @@ export default function Home({}) {
                     <a href={url.url}>{url.url}</a>
                   </td>
                   <td>
-                    <a href={url.entryurl}>{url.entryurl}</a>
+                    <a href={accessurl}>{accessurl}</a>
                   </td>
                   <td>
                     <button
                       onClick={async () => {
                         try {
-                          navigator.clipboard.writeText(url.entryurl);
+                          navigator.clipboard.writeText(accessurl);
                           setCopiedIndex(index);
                         } catch (e) {
                           alert(`fail to copy: ${e}`);
@@ -269,7 +286,10 @@ function makeUrl(data: InputForm, prefix: string): string {
   return urlObj.href;
 }
 
-function serializeInputForm(data: InputForm): URLSearchParams {
+function serializeInputForm(
+  data: InputForm,
+  encrypt: boolean
+): URLSearchParams {
   let values: {
     [key: string]: any;
   } = {};
@@ -284,6 +304,9 @@ function serializeInputForm(data: InputForm): URLSearchParams {
     } else if (data[key]) {
       values[key] = data[key];
     }
+  }
+  if (encrypt) {
+    values["encrypt"] = 1;
   }
   console.log("serialize", values);
   return new URLSearchParams(values);

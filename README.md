@@ -30,8 +30,10 @@ TOC
   - [Signing key type](#signing-key-type)
   - [Scope signing](#scope-signing)
   - [Open scopes](#open-scopes)
+  - [URL encryption](#url-encryption)
   - [Referer restrictions](#referer-restrictions)
   - [Origin restrictions](#origin-restrictions)
+  - [Error Suppressions and Logging](#error-suppressions-and-logging)
 
 ## Run
 
@@ -65,6 +67,8 @@ Command-line flag arguments:
         Enable rclone scheme url: "rclone://remote/path/to/file"
   -enable-unix
         Enable unix domain socket url: "unix:///path/to/socket:http://server/path"
+  -encrypt
+        Used with "-sign", encrypt generated entrypoint url
   -key string
         The sign key. If set, all requests must be signed using HMAC(key, 'sha-256', payload=url), providing calculated MAC (hex string) in _sgp_sign
   -keytype string
@@ -91,6 +95,8 @@ Command-line flag arguments:
         Root path (with leading and trailing slash) (default "/")
   -sign
         Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)
+  -supress-error
+        Supress error display, send a 404 to client instead
   -user string
         Username of admin UI (Admin UI is available at "/admin" path) (default "root")
 ```
@@ -141,7 +147,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_forcesub` : (Value ignored) Force apply `_sgp_sub_` rules to the response of any MIME type.
 - `_sgp_cookie=<value>` : Set request cookie. Equivalent to `_sgp_header_cookie=<value>`.
 - `_sgp_type=<value>` : Set the request content type. Equivalent to `_sgp_header_Content-Type=<value>`. If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
-- `_sgp_restype=<value>` : Set the response content type. Equivalent to `_sgp_resheader_Content-Type=<value>`. Additionally, `_sgp_type` and `_sgp_restype` support file extension values like `txt` or `.txt` (with or without leading dot), in which case it will use the MIME type associated with the file extension ext.
+- `_sgp_restype=<value>` : Set the response content type. Equivalent to `_sgp_resheader_Content-Type=<value>`. Additionally, `_sgp_type` and `_sgp_restype` also accept file extension values like `txt` or `.txt` (with or without leading dot), in which case it will use the MIME type associated with the file extension ext.
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. A special `*` value can be used to forward ALL request headers. The following headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`; A special "\n" (`%0A`) value supresses this behavior and makes sure no headers would be forwarded.
 - `_sgp_user=username:password` : Set the authentication username & password for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
@@ -349,6 +355,16 @@ Example:
 simplegoproxy -enable-all -key abc -open-http
 ```
 
+### URL encryption
+
+Instead of putting the plain text target url inside the entrypoint url. If request signing is enabled, simplegoproxy also accepts the "encrypted form entrypoint url" in which the target url exists as cipher text.
+
+To get the encrypted form entrypoint url, use the `-encrypt` flag with `-sign` when signing an url using CLI; Or check the "Encrypt" checkbox in Admin UI.
+
+Note the "Modification parameters fronting" does not work with URL encryption -- the whole target url with all query parameters will be encrypted. The encrypted entrypoint url contains only one path segment, e.g.: `http://localhost:8380/abcdefghijklmnopqrstuvwxyz`.
+
+The target urls are encrypted using "key" flag value as the cryptographic key. If you change the key, all previously generated entrypoint urls will be inaccessible.
+
 ### Referer restrictions
 
 If any `_sgp_referer` parameter is provided. Simplegoproxy will validate the `Referer` header of the request to the entrypoint url and only allow theses requests which referer match with at lease one provided `_sgp_referer` value.
@@ -360,3 +376,9 @@ Referer restrictions works even if request signing is not enabled.
 ### Origin restrictions
 
 It works in the same way as the above "Referer restrictions" feature except that the parameter name is `_sgp_origin` and is verified against the `Origin` request header.
+
+### Error Suppressions and Logging
+
+By default, when simplegoproxy web server encounters an error handling a request (e.g. signing verification failed), it displays the error to the client. If `-supress-error` flag is set, it will supress the error display, always sending a standard "404 Not Found" page to client if any error happens.
+
+Also, by default simplegoproxy does not log incoming requests and / or errors. To do the logging, set the `-log` flag, the log will outputted to stdout.
