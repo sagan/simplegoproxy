@@ -956,6 +956,16 @@ func getArgs(queryParams url.Values) (args []string, err error) {
 	return args, nil
 }
 
+func ErrResponseMsg(format string, args ...any) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header: http.Header{
+			"Content-Type": []string{constants.MIME_TXT},
+		},
+		Body: io.NopCloser(strings.NewReader(fmt.Sprintf(format, args...))),
+	}
+}
+
 // Return a http 416 range not satisfiable response.
 func errResponseInvalidRange(size int64) *http.Response {
 	return &http.Response{

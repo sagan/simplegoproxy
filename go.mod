@@ -6,9 +6,11 @@ require (
 	github.com/Noooste/azuretls-client v1.5.2
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/jxskiss/base62 v1.1.0
+	github.com/pelletier/go-toml/v2 v2.2.2
 	github.com/quantumsheep/range-parser v1.1.0
 	github.com/vincent-petithory/dataurl v1.0.0
 	golang.org/x/crypto v0.25.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (

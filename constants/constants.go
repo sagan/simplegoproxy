@@ -1,8 +1,8 @@
 package constants
 
 const DEFAULT_MIME = "application/octet-stream"
-
 const MIME_TXT = "text/plain; charset=utf-8"
+const MIME_HTML = "text/html; charset=utf-8"
 
 // Copied from Chrome file:// url dir index page.
 // Go html/template format.

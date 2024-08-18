@@ -2,7 +2,9 @@
 
 Simplegoproxy is a http / API proxy that can, and is designed and intended to be used to modify the http request headers, response headers and / or response body on the fly, based on custom rules per request, and then return the modified response to the user.
 
-Simply put, Simplegoproxy generates an "entrypoint url", which can be accessed (GET) to make an arbitrary http request to the "target url" (All aspects of the Request or Response can be set or modified), and returns the final result (modified Response) to the user.
+Simply put, Simplegoproxy generates an "entrypoint url", which can be accessed (GET) to make an arbitrary request to the "target url" (All aspects of the Request or Response can be set or modified), and returns the final result (modified Response) to the user.
+
+Basically, the "target url" is a http(s) url, but it also supports some special customary scheme urls. E.g. the `exec://` urls, which execute a local program and send it's output back to the client as http response.
 
 Use cases:
 
@@ -19,6 +21,7 @@ TOC
 - [Other features](#other-features)
   - [Modification parameters fronting](#modification-parameters-fronting)
   - [Impersonate the Browser](#impersonate-the-browser)
+  - [Response template](#response-template)
   - [Admin UI](#admin-ui)
   - ["data:" urls](#data-urls)
   - [`unix://`, `file://`, `rclone://`, `curl+*//`, `exec://` urls](#unix-file-rclone-curl-exec-urls)
@@ -149,6 +152,8 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_type=<value>` : Set the request content type. Equivalent to `_sgp_header_Content-Type=<value>`. If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
 - `_sgp_restype=<value>` : Set the response content type. Equivalent to `_sgp_resheader_Content-Type=<value>`. Additionally, `_sgp_type` and `_sgp_restype` also accept file extension values like `txt` or `.txt` (with or without leading dot), in which case it will use the MIME type associated with the file extension ext.
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
+- `_sgp_resbody=<value>` : Set the response body template.
+- `_sgp_resbodytype=<value>` : The original response body type, e.g. json, xml, yaml, toml.
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. A special `*` value can be used to forward ALL request headers. The following headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`; A special "\n" (`%0A`) value supresses this behavior and makes sure no headers would be forwarded.
 - `_sgp_user=username:password` : Set the authentication username & password for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below "Impersonate the Browser" section.
@@ -185,6 +190,31 @@ Simplegoproxy will print the list of supported targets when starting. Currently 
 
 - `chrome120` : Chrome 120 on Windows 11 x64 en-US
 - `firefox121` : Firefox 121 on Windows 11 x64 en-US
+
+### Response template
+
+if `_sgp_resbody` flag is set, Simplegoproxy use it as a [Go template](https://pkg.go.dev/text/template) for renderring response body. E.g.:
+
+```
+{{.res.status}}
+
+{{.res.body}}
+```
+
+Available variables:
+
+- `res` : The original http response.
+  - `res.status` : http response status code. type: `int`.
+  - `res.header`: http response header. type: `map[string][]string`.
+  - `res.body` : http response body. type: `string`.
+  - `res.data` : http response body parsed data object. type: `any`.
+- `req` : The http request sent to the target url server.
+  - `req.header` : Http request header.
+- `err` : Error encountered, if any.
+
+The `res.data` is parsed according to original http response's content-type header. You can also forcibly specify the type using `_sgp_resbodytype` flag (json / yaml / xml / toml).
+
+The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` flag to override it.
 
 ### Admin UI
 
@@ -357,7 +387,7 @@ simplegoproxy -enable-all -key abc -open-http
 
 ### URL encryption
 
-Instead of putting the plain text target url inside the entrypoint url. If request signing is enabled, simplegoproxy also accepts the "encrypted form entrypoint url" in which the target url exists as cipher text.
+Instead of putting the plain text target url inside the entrypoint url. If request signing is enabled, Simplegoproxy also accepts the "encrypted form entrypoint url" in which the target url exists as cipher text.
 
 To get the encrypted form entrypoint url, use the `-encrypt` flag with `-sign` when signing an url using CLI; Or check the "Encrypt" checkbox in Admin UI.
 
@@ -379,6 +409,6 @@ It works in the same way as the above "Referer restrictions" feature except that
 
 ### Error Suppressions and Logging
 
-By default, when simplegoproxy web server encounters an error handling a request (e.g. signing verification failed), it displays the error to the client. If `-supress-error` flag is set, it will supress the error display, always sending a standard "404 Not Found" page to client if any error happens.
+By default, when Simplegoproxy web server encounters an error handling a request (e.g. signing verification failed), it displays the error to the client. If `-supress-error` flag is set, it will supress the error display, always sending a standard "404 Not Found" page to client if any error happens.
 
-Also, by default simplegoproxy does not log incoming requests and / or errors. To do the logging, set the `-log` flag, the log will outputted to stdout.
+Also, by default Simplegoproxy does not log incoming requests and / or errors. To do the logging, set the `-log` flag, the log will outputted to stdout.

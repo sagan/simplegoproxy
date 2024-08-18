@@ -7,6 +7,8 @@ import { Generate, GenerateRequest, fetchGenerate } from "./api.js";
 interface InputForm {
   url: string;
   keytype: string;
+  body: string;
+  resbody: string;
   cors: boolean;
   nocsp: boolean;
   fdua: boolean;
@@ -32,6 +34,8 @@ export default function Home({}) {
   );
   let [searchParams, setSearchParams] = useSearchParams();
   const [copiedIndex, setCopiedIndex] = useState(-1);
+  const [showbody, setShowbody] = useState(!!searchParams.get("body"));
+  const [showresbody, setShowresbody] = useState(!!searchParams.get("resbody"));
   let encrypt = !!searchParams.get("encrypt");
   return (
     <>
@@ -153,6 +157,42 @@ export default function Home({}) {
               {...register("addon")}
             />
           </label>
+          <label title="Set request body ">
+            <input
+              checked={showbody}
+              type="checkbox"
+              onChange={() => setShowbody(!showbody)}
+            />
+            &nbsp;Body
+          </label>
+          <label title="Set response body ">
+            <input
+              checked={showresbody}
+              type="checkbox"
+              onChange={() => setShowresbody(!showresbody)}
+            />
+            &nbsp;ResBody
+          </label>
+        </p>
+        <p className="flex">
+          {showbody && (
+            <textarea
+              className="flex-1"
+              placeholder="body"
+              defaultValue={searchParams.get("body") || ""}
+              {...register("body")}
+            />
+          )}
+        </p>
+        <p className="flex">
+          {showresbody && (
+            <textarea
+              className="flex-1"
+              placeholder="resbody"
+              defaultValue={searchParams.get("resbody") || ""}
+              {...register("resbody")}
+            />
+          )}
         </p>
       </form>
       <div className="flex-1 overflow-auto">

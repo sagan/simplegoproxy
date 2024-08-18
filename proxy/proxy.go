@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
@@ -18,10 +20,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/vincent-petithory/dataurl"
+	"gopkg.in/yaml.v2"
 
+	"github.com/sagan/simplegoproxy/constants"
 	"github.com/sagan/simplegoproxy/util"
 )
 
@@ -42,6 +48,8 @@ const (
 	USER_STRING            = "user"
 	FDHEADERS_STRING       = "fdheaders"
 	BODY_STRING            = "body"
+	RESBODY_STRING         = "resbody"
+	RESBODYTYPE_STRING     = "resbodytype"
 	TYPE_STRING            = "type"
 	RESTYPE_STRING         = "restype"
 	METHOD_STRING          = "method"
@@ -74,7 +82,7 @@ func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg 
 	if supress {
 		http.NotFound(w, r)
 	} else {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(errormsg))
 	}
 	if dolog {
@@ -212,6 +220,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 
 func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, prefix, signkey string,
 	keytypeBlacklist, openScopes []string, rcloneBinary, rcloneConfig string, doLog bool) (*http.Response, error) {
+	var err error
 	header := http.Header{}
 	responseHeaders := map[string]string{}
 	subs := map[string]string{}
@@ -231,8 +240,10 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	user := ""
 	fdheaders := ""
 	body := ""
+	var resBodyTemplate *template.Template
 	contentType := ""
 	responseContentType := ""
+	responseBodyType := ""
 	method := http.MethodGet
 	keytype := ""
 	sign := ""
@@ -276,10 +287,16 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			fdheaders = value
 		case BODY_STRING:
 			body = value
+		case RESBODY_STRING:
+			if resBodyTemplate, err = template.New("template").Parse(value); err != nil {
+				return nil, fmt.Errorf("invalid template: %v", err)
+			}
 		case TYPE_STRING:
 			contentType = value
 		case RESTYPE_STRING:
 			responseContentType = value
+		case RESBODYTYPE_STRING:
+			responseBodyType = value
 		case KEYTYPE_STRING:
 			keytype = value
 		case SCOPE_STRING:
@@ -435,6 +452,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		}
 	}
 
+	var req *http.Request
 	urlStr := urlObj.String()
 	var res *http.Response
 	if urlObj.Scheme == "data" {
@@ -456,7 +474,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		if body != "" {
 			reqBody = strings.NewReader(body)
 		}
-		req, err := http.NewRequestWithContext(srReq.Context(), method, urlStr, reqBody)
+		req, err = http.NewRequestWithContext(srReq.Context(), method, urlStr, reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("invalid http request: %v", err)
 		}
@@ -482,6 +500,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		}
 	}
 
+	originalResponseContentType := res.Header.Get("Content-Type")
 	res.Header.Del("Strict-Transport-Security")
 	res.Header.Del("Clear-Site-Data")
 	res.Header.Del("Set-Cookie")
@@ -514,7 +533,59 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	if responseContentType != "" {
 		res.Header.Set("Content-Type", util.Mime(responseContentType))
 	}
-	if len(subs) > 0 {
+
+	if resBodyTemplate != nil {
+		var request = map[string]any{"header": http.Header{}}
+		if req != nil {
+			request["header"] = req.Header
+		}
+		var response = map[string]any{
+			"status": res.StatusCode,
+			"header": res.Header,
+		}
+		if responseBodyType == "" && originalResponseContentType != "" {
+			if ct, _, err := mime.ParseMediaType(originalResponseContentType); err == nil {
+				responseBodyType = ct
+			}
+		}
+		var body []byte
+		if res.Body != nil {
+			if body, err = io.ReadAll(res.Body); err != nil {
+				return util.ErrResponseMsg("Failed to read body: %v", err), nil
+			}
+		}
+		var data any
+		var dataerr error
+		if body != nil {
+			switch responseBodyType {
+			case "application/json", "text/json", "json":
+				dataerr = json.Unmarshal(body, &data)
+			case "application/yaml", "text/yaml", "yaml":
+				dataerr = yaml.Unmarshal(body, &data)
+			case "application/xml", "text/xml", "xml":
+				dataerr = xml.Unmarshal(body, &data)
+			case "application/toml", "text/toml", "toml":
+				dataerr = toml.Unmarshal(body, &data)
+			}
+		}
+		response["body"] = string(body)
+		response["data"] = data
+		buf := &bytes.Buffer{}
+		err = resBodyTemplate.Execute(buf, map[string]any{
+			"req": request,
+			"res": response,
+			"err": dataerr,
+		})
+		if err != nil {
+			return util.ErrResponseMsg("Failed to execute response template: %v", err), nil
+		} else {
+			res.StatusCode = http.StatusOK
+			res.Body = io.NopCloser(buf)
+			if responseContentType == "" {
+				res.Header.Set("Content-Type", constants.MIME_HTML)
+			}
+		}
+	} else if len(subs) > 0 && res.Body != nil {
 		doSub := forcesub
 		if !doSub {
 			if contentType := res.Header.Get("Content-Type"); contentType != "" {
@@ -524,11 +595,10 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 				}
 			}
 		}
-		if doSub && res.Body != nil {
+		if doSub {
 			body, err := io.ReadAll(res.Body)
 			if err != nil {
-				res.StatusCode = 500
-				res.Body = io.NopCloser(strings.NewReader(fmt.Sprintf("Failed to read body: %v", err)))
+				return util.ErrResponseMsg("Failed to read body: %v", err), nil
 			} else {
 				data := string(body) // for now, assume UTF-8
 				for sub, replace := range subs {
@@ -538,6 +608,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			}
 		}
 	}
+
 	return res, nil
 }
 

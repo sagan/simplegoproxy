@@ -32,11 +32,13 @@ code {
 
 input,
 select,
+textarea,
 button {
   border: 1px dotted gray;
 }
 
 input,
+textarea,
 select {
   padding-left: 5px;
   padding-right: 5px;
