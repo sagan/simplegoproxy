@@ -5,8 +5,18 @@ interface Generate {
   sign: string;
 }
 
+interface Decrypt {
+  url: string;
+  encrypted_entryurl: string;
+}
+
 interface GenerateRequest {
   url: string;
+  publicurl: string;
+}
+
+interface DecryptRequest {
+  encryptedurl: string;
   publicurl: string;
 }
 
@@ -41,4 +51,8 @@ export async function fetchGenerate(req: GenerateRequest) {
   return await fetchApi<Generate>({ func: "generate", ...req });
 }
 
-export type { Generate, GenerateRequest };
+export async function fetchDecrypt(req: DecryptRequest) {
+  return await fetchApi<Decrypt>({ func: "decrypt", ...req });
+}
+
+export type { Generate, GenerateRequest, Decrypt, DecryptRequest };

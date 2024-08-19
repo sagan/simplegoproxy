@@ -58,6 +58,8 @@ Command-line flag arguments:
         Set "Access-Control-Allow-Origin: *" header for admin API
   -curl-binary string
         Curl binary path (default "curl")
+  -decrypt
+        Decrypt the encrypted url(s)
   -enable-all
         Enable all schemes url: unix & file & rclone & curl & exec
   -enable-curl

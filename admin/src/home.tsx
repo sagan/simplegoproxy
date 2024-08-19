@@ -2,7 +2,12 @@ import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "@rehooks/local-storage";
-import { Generate, GenerateRequest, fetchGenerate } from "./api.js";
+import {
+  Generate,
+  GenerateRequest,
+  fetchDecrypt,
+  fetchGenerate,
+} from "./api.js";
 
 interface InputForm {
   url: string;
@@ -84,7 +89,46 @@ export default function Home({}) {
             &nbsp;Encrypt
           </label>
           <button type="submit">Generate</button>
-          <button type="reset">Reset</button>
+          <button
+            type="button"
+            onClick={() => {
+              let values = getValues();
+              reset();
+              // react-hook-form problem workaround: in the same callback, reset and setValue can not both take effect
+              setTimeout(() => {
+                setValue("url", values.url);
+              }, 0);
+            }}
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            title="Decrypt a encrypted url"
+            onClick={async () => {
+              let publicurl = window.__ROOTURL__;
+              let encryptedurl = prompt("Input the encrypted url:", "");
+              if (!encryptedurl) {
+                return;
+              }
+              try {
+                let res = await fetchDecrypt({ encryptedurl, publicurl });
+                setUrls([
+                  {
+                    url: res.url,
+                    encrypted_entryurl: res.encrypted_entryurl,
+                    entryurl: "",
+                    sign: "",
+                  },
+                  ...urls,
+                ]);
+              } catch (e) {
+                alert(`failed to decrypt: ${e}`);
+              }
+            }}
+          >
+            Decrypt
+          </button>
         </p>
         <p className="flex flex-wrap">
           <label title="Add the CORS-allow-all headers to original response">
@@ -224,7 +268,10 @@ export default function Home({}) {
             {urls.map((url, i) => {
               let index = urls.length - i;
               let accessurl = url.entryurl;
-              if (encrypt && url.encrypted_entryurl != "") {
+              if (
+                (encrypt && url.encrypted_entryurl != "") ||
+                (accessurl == "" && url.encrypted_entryurl != "")
+              ) {
                 accessurl = url.encrypted_entryurl;
               }
               return (
@@ -261,6 +308,86 @@ export default function Home({}) {
                       }}
                     >
                       X
+                    </button>
+                    <button
+                      title="Use this url again"
+                      onClick={() => {
+                        try {
+                          let urlObj = new URL(url.url);
+                          let values: InputForm = {
+                            url: "",
+                            keytype: "",
+                            body: "",
+                            resbody: "",
+                            cors: false,
+                            nocsp: false,
+                            fdua: false,
+                            fdauth: false,
+                            debug: false,
+                            addon: "",
+                            scope: "",
+                            timeout: 0,
+                          };
+                          let params: string[][] = [];
+                          for (const [key, value] of urlObj.searchParams) {
+                            params.push([key, value]);
+                          }
+                          for (let [key, value] of params) {
+                            if (
+                              !key.startsWith(window.__PREFIX__) ||
+                              key.length == window.__PREFIX__.length
+                            ) {
+                              continue;
+                            }
+                            urlObj.searchParams.delete(key, value);
+                            key = key.substring(window.__PREFIX__.length);
+                            if (values[key] !== undefined) {
+                              switch (typeof values[key]) {
+                                case "boolean":
+                                  if (value) {
+                                    values[key] = true;
+                                  }
+                                  break;
+                                case "number":
+                                  if (value) {
+                                    values[key] = parseInt(value) || 0;
+                                  }
+                                  break;
+                                case "string":
+                                  if (value) {
+                                    values[key] = value;
+                                  }
+                              }
+                            } else if (key != "sign") {
+                              if (values.addon != "") {
+                                values.addon += "&";
+                              }
+                              values.addon +=
+                                key + "=" + encodeURIComponent(value);
+                            }
+                          }
+                          let option = {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                          };
+                          setValue("fdua", values.fdua, option);
+                          setValue("fdauth", values.fdauth, option);
+                          setValue("cors", values.cors, option);
+                          setValue("nocsp", values.nocsp, option);
+                          setValue("debug", values.debug, option);
+                          setValue("keytype", values.keytype, option);
+                          setValue("scope", values.scope, option);
+                          setValue("addon", values.addon, option);
+                          setValue("timeout", values.timeout, option);
+                          setValue("body", values.body, option);
+                          setValue("resbody", values.resbody, option);
+                          setValue("url", urlObj.href, option);
+                        } catch (e) {
+                          alert(`${e}`);
+                        }
+                      }}
+                    >
+                      Use
                     </button>
                   </td>
                 </tr>

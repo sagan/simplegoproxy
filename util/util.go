@@ -39,7 +39,7 @@ type NetRequest struct {
 	Req          *http.Request
 	Impersonate  string
 	Insecure     bool
-	Timeout      int
+	Timeout      int64
 	Proxy        string
 	Norf         bool
 	RcloneBinary string
@@ -387,49 +387,59 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 // If timeout > 0, it will wait for timeout seconds before returning process stdout as body.
 // If the child process exits before timeout with non-zero exit code, it returns error.
 // If the child process exits after timeout with none-zero exit code, there's no way to notify it to caller.
-// If combine is true, the body is the combined stdout and stderr of child process, instead of stdout only.
+// If debug is true, the body is the combined stdout and stderr of child process, instead of stdout only,
+// and it will output the process's exit code after the main stream ends.
 // At least one of returned body and err will be non-nil; It may return both non-nil body and err.
 // The caller is responsible to close the returned body, if not nil.
-func runProcess(ctx context.Context, binary string, args []string, timeout int,
-	combine bool) (body io.ReadCloser, err error) {
+func runProcess(ctx context.Context, binary string, args []string, timeout int64,
+	debug bool) (body io.ReadCloser, err error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
 	var stdout, stderr io.ReadCloser
 	var combineReader, combineWriter *os.File
-	if combine {
+	if debug {
 		combineReader, combineWriter, err = os.Pipe()
 		if err != nil {
-			return nil, fmt.Errorf("failed to create combined pipe: %v", err)
+			return nil, fmt.Errorf("failed to create combined pipe: %w", err)
 		}
 		cmd.Stdout = combineWriter
 		cmd.Stderr = combineWriter
 	} else {
 		stdout, err = cmd.StdoutPipe()
 		if err != nil {
-			return nil, fmt.Errorf("failed to pipe process stdout: %v", err)
+			return nil, fmt.Errorf("failed to pipe process stdout: %w", err)
 		}
 		stderr, err = cmd.StderrPipe()
 		if err != nil {
-			return nil, fmt.Errorf("failed to pipe process stderr: %v", err)
+			return nil, fmt.Errorf("failed to pipe process stderr: %w", err)
 		}
 	}
 	if err := cmd.Start(); err != nil {
-		if combine {
+		if debug {
 			combineReader.Close()
 			combineWriter.Close()
 		}
-		return nil, fmt.Errorf("failed to exec process: %v", err)
+		return nil, fmt.Errorf("failed to exec process: %w", err)
 	}
-	if combine {
+	if debug {
 		combineWriter.Close()
 	}
-	if timeout > 0 {
+	var suffix *onetimeBuffer
+	if debug || timeout > 0 {
+		suffix = NewOnetimeBuffer()
 		var cmderr error
 		donech := make(chan struct{})
 		go func() {
 			//cmd.Wait will close pipes so do not use it.
 			state, err := cmd.Process.Wait()
-			if err == nil && !state.Success() {
-				cmderr = &exec.ExitError{ProcessState: state}
+			if err == nil {
+				if !state.Success() {
+					cmderr = &exec.ExitError{ProcessState: state}
+				}
+				if debug {
+					suffix.WriteOnce([]byte(fmt.Sprintf("\nprocess exit %d\n", state.ExitCode())))
+				} else {
+					suffix.WriteOnce(nil)
+				}
 			}
 			select {
 			case donech <- struct{}{}:
@@ -438,22 +448,25 @@ func runProcess(ctx context.Context, binary string, args []string, timeout int,
 			close(donech)
 		}()
 		cmddone := false
-		select {
-		case <-donech:
-			cmddone = true
-		case <-time.After(time.Second * time.Duration(timeout)):
-		}
-		if cmddone && cmderr != nil {
-			if combine {
-				return combineReader, fmt.Errorf("process err: %v", cmderr)
-			} else {
-				stdout.Close()
-				return stderr, fmt.Errorf("process err: %v", cmderr)
+		if timeout > 0 {
+			select {
+			case <-donech:
+				cmddone = true
+			case <-time.After(time.Second * time.Duration(timeout)):
+			}
+			if cmddone && cmderr != nil {
+				err = fmt.Errorf("process err: %w", cmderr)
+				if debug {
+					return ReadCloserWithAddition(combineReader, nil, suffix), err
+				} else {
+					stderr.Close()
+					return stdout, err
+				}
 			}
 		}
 	}
-	if combine {
-		return combineReader, nil
+	if debug {
+		return ReadCloserWithAddition(combineReader, nil, suffix), nil
 	} else {
 		stderr.Close()
 		return stdout, nil
@@ -505,18 +518,7 @@ func fetchCurl(netreq *NetRequest) (res *http.Response, err error) {
 		log.Printf("Run %s %v", curl, args)
 	}
 	body, err := runProcess(req.Context(), curl, args, netreq.Timeout, netreq.Debug)
-	if err != nil {
-		return errResponse(err, body), nil
-	}
-	res = &http.Response{
-		StatusCode: http.StatusOK,
-		Header: http.Header{
-			// guess mime fron url
-			"Content-Type": []string{FileContentType(req.URL.Path)},
-		},
-		Body: body,
-	}
-	return res, nil
+	return processResponse(body, err, FileContentType(req.URL.Path)), nil
 }
 
 // "exec:///path/to/binary?arg=a&arg=b" => "/path/to/binary a b"
@@ -534,15 +536,7 @@ func fetchExec(netreq *NetRequest) (res *http.Response, err error) {
 		log.Printf("Run %s %v", localfilepath, args)
 	}
 	body, err := runProcess(netreq.Req.Context(), localfilepath, args, netreq.Timeout, netreq.Debug)
-	if err != nil {
-		return errResponse(err, body), nil
-	}
-	res = &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{},
-		Body:       body,
-	}
-	return res, nil
+	return processResponse(body, err, ""), nil
 }
 
 // https://rclone.org/commands/rclone_cat/
@@ -667,11 +661,7 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		log.Printf("Run %s %v", rcloneBinary, args)
 	}
 	body, err := runProcess(req.Context(), rcloneBinary, args, netreq.Timeout, netreq.Debug)
-	if err != nil {
-		return errResponse(err, body), nil
-	}
-	res.Body = body
-	return res, nil
+	return processResponse(body, err, ""), nil
 }
 
 func FetchUrl(netreq *NetRequest) (*http.Response, error) {
@@ -874,11 +864,50 @@ func (p *prefixReadCloser) Close() error {
 }
 
 // Return io.ReadCloser that return prefix, then read from rc.
-func ReadCloserWithPrefix(rc io.ReadCloser, prefix []byte) io.ReadCloser {
+func ReadCloserWithAddition(rc io.ReadCloser, prefix, suffix io.Reader) io.ReadCloser {
+	var readers []io.Reader
+	if prefix != nil {
+		readers = append(readers, prefix)
+	}
+	readers = append(readers, rc)
+	if suffix != nil {
+		readers = append(readers, suffix)
+	}
 	return &prefixReadCloser{
-		Reader: io.MultiReader(bytes.NewReader(prefix), rc),
+		Reader: io.MultiReader(readers...),
 		rc:     rc,
 	}
+}
+
+// onetimeBuffer is a io.Reader, that can only be written once using WriteOnce.
+// When Read() is called, if WriteOnce is still not called, it blocks;
+// after WriteOnce is called, it return the written data and then EOF to reader.
+type onetimeBuffer struct {
+	buf  bytes.Buffer
+	done chan struct{}
+}
+
+func NewOnetimeBuffer() *onetimeBuffer {
+	return &onetimeBuffer{
+		done: make(chan struct{}),
+	}
+}
+
+func (ob *onetimeBuffer) Read(p []byte) (n int, err error) {
+	<-ob.done
+	return ob.buf.Read(p)
+}
+
+func (ob *onetimeBuffer) WriteOnce(p []byte) (n int, err error) {
+	select {
+	case _, ok := <-ob.done:
+		if !ok {
+			return 0, fmt.Errorf("channel is closed")
+		}
+	default:
+	}
+	close(ob.done)
+	return ob.buf.Write(p)
 }
 
 // Tell if abspath is a file system root path (e.g. "/" or "C:\")
@@ -977,18 +1006,26 @@ func errResponseInvalidRange(size int64) *http.Response {
 }
 
 // Return a http response for err.
-func errResponse(err error, body io.ReadCloser) *http.Response {
-	if body != nil {
-		if err != nil {
-			body = ReadCloserWithPrefix(body, []byte(fmt.Sprintf("%v\n\n", err)))
-		}
-	} else if err != nil {
-		body = io.NopCloser(strings.NewReader(fmt.Sprint(err)))
+func processResponse(body io.ReadCloser, err error, okMime string) *http.Response {
+	var status int
+	if err == nil {
+		status = http.StatusOK
+	} else {
+		status = http.StatusInternalServerError
+	}
+	var mime string
+	if err == nil && okMime != "" {
+		mime = okMime
+	} else {
+		mime = constants.MIME_TXT
+	}
+	if body == nil && err != nil {
+		body = io.NopCloser(strings.NewReader(fmt.Sprintf("process error: %v", err)))
 	}
 	return &http.Response{
-		StatusCode: http.StatusInternalServerError,
+		StatusCode: status,
 		Header: http.Header{
-			"Content-Type": []string{constants.MIME_TXT},
+			"Content-Type": []string{mime},
 		},
 		Body: body,
 	}

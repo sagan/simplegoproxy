@@ -28,6 +28,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/sagan/simplegoproxy/constants"
+	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/util"
 )
 
@@ -74,9 +75,6 @@ var (
 	}
 )
 
-// match with a encrypted url base62 string
-var encryptedUrlRegex = regexp.MustCompile(`^[a-zA-Z0-9]{18,}$`)
-
 func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg string, args ...any) {
 	errormsg := fmt.Sprintf(msg, args...)
 	if supress {
@@ -97,7 +95,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	reqUrlQuery := r.URL.Query()
 	targetUrl := r.URL.EscapedPath()
 	encryptUrlMode := false
-	if encryptedUrlRegex.MatchString(targetUrl) {
+	if constants.EncryptedUrlRegex.MatchString(targetUrl) {
 		decrypted, err := util.Decrypt(cipher, targetUrl)
 		if err != nil {
 			sendError(w, r, supressError, doLog, "Invalid encrypted url: %v", err)
@@ -235,7 +233,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	openMode := util.MatchUrlPatterns(openScopes, urlObj.String(), false)
 	proxy := ""
 	impersonate := ""
-	timeout := 0
+	timeout := int64(0)
 	cookie := ""
 	user := ""
 	fdheaders := ""
@@ -324,8 +322,12 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		case SIGN_STRING:
 			sign = value
 		case TIMEOUT_STRING:
-			if t, err := strconv.Atoi(value); err != nil {
+			if t, err := strconv.ParseInt(value, 10, 64); err != nil {
 				return nil, fmt.Errorf("failed to parse timtout %s: %v", value, err)
+			} else if t == -1 {
+				timeout = constants.INFINITE_TIMEOUT
+			} else if t < 0 {
+				return nil, fmt.Errorf("netagive timeout is invalid (except -1, which means infinite)")
 			} else {
 				timeout = t
 			}
@@ -721,4 +723,29 @@ func Generate(targetUrl, key, publicurl, prefix string,
 		entryurl = fmt.Sprintf("%s/%s", strings.TrimSuffix(publicurl, "/"), canonicalurl)
 	}
 	return
+}
+
+func Decrypt(encryptedurl, publicurl string) (url, encryptedEntryurl string, err error) {
+	i := strings.LastIndex(encryptedurl, "?")
+	if i != -1 {
+		encryptedurl = encryptedurl[:i]
+	}
+	i = strings.LastIndex(encryptedurl, "/")
+	if i != -1 {
+		encryptedurl = encryptedurl[i+1:]
+	}
+	if !constants.EncryptedUrlRegex.MatchString(encryptedurl) {
+		return "", "", fmt.Errorf("invalid parameters")
+	}
+	if flags.Cipher == nil {
+		return "", "", fmt.Errorf("key is empty")
+	}
+	plaindata, err := util.Decrypt(flags.Cipher, encryptedurl)
+	if err != nil {
+		return "", "", err
+	}
+	if publicurl != "" {
+		encryptedEntryurl = strings.TrimSuffix(publicurl, "/") + "/" + encryptedurl
+	}
+	return string(plaindata), encryptedEntryurl, nil
 }

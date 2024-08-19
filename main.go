@@ -65,31 +65,47 @@ func main() {
 	} else if flags.Key == "" {
 		log.Fatalf(`The "pass" flag must be used with "key" flag`)
 	}
-	if flags.Sign {
+	if flags.Sign && flags.Decrypt {
+		log.Fatalf(`"sign" and "decrypt" flags are not compatible`)
+	}
+	if flags.Sign || flags.Decrypt {
 		if flags.Key == "" || len(args) == 0 {
-			log.Fatalf("The signkey flag and at least one argument (url) must be provided")
+			log.Fatalf(`The "key" flag and at least one positional argument (url) must be provided`)
 		}
-		for _, targetUrl := range args {
-			canonicalurl, sign, encryptedurl, entryurl, encryptedEntryurl := proxy.Generate(targetUrl, flags.Key,
-				flags.PublicUrl, flags.Prefix, flags.Cipher)
-			var display string
-			if !flags.Encrypt {
-				if entryurl != "" {
-					display = entryurl
-				} else if flags.Keytype != "" {
-					display = sign
+		if flags.Sign {
+			for _, targetUrl := range args {
+				canonicalurl, sign, encryptedurl, entryurl, encryptedEntryurl := proxy.Generate(targetUrl, flags.Key,
+					flags.PublicUrl, flags.Prefix, flags.Cipher)
+				var display string
+				if !flags.Encrypt {
+					if entryurl != "" {
+						display = entryurl
+					} else if flags.Keytype != "" {
+						display = sign
+					} else {
+						display = fmt.Sprintf("%s%s=%s&%s%s=%s", flags.Prefix, proxy.KEYTYPE_STRING, flags.Keytype,
+							flags.Prefix, proxy.SIGN_STRING, sign)
+					}
 				} else {
-					display = fmt.Sprintf("%s%s=%s&%s%s=%s", flags.Prefix, proxy.KEYTYPE_STRING, flags.Keytype,
-						flags.Prefix, proxy.SIGN_STRING, sign)
+					if entryurl != "" {
+						display = encryptedEntryurl
+					} else {
+						display = encryptedurl
+					}
 				}
-			} else {
-				if entryurl != "" {
-					display = encryptedEntryurl
-				} else {
-					display = encryptedurl
-				}
+				fmt.Printf("%s  %s\n", canonicalurl, display)
 			}
-			fmt.Printf("%s  %s\n", canonicalurl, display)
+		} else if flags.Decrypt {
+			for _, targetUrl := range args {
+				url, _, err := proxy.Decrypt(targetUrl, "")
+				var display string
+				if err != nil {
+					display = fmt.Sprintf("// %v", err)
+				} else {
+					display = url
+				}
+				fmt.Printf("%s  %s\n", targetUrl, display)
+			}
 		}
 		return
 	}
@@ -102,7 +118,7 @@ func main() {
 		flags.EnableFile, flags.EnableUnix, flags.EnableRclone, flags.EnableCurl, flags.EnableExec)
 	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(proxy.TEXTUAL_MIMES, ", "))
 	fmt.Printf("Blacklist keytypes: %v\n", flags.KeytypeBlacklist)
-	fmt.Printf("Admin Web UI at %q with user/pass: %s:%s\n", adminPath, flags.User, flags.Pass)
+	fmt.Printf("Admin Web UI at %q with user/pass: %s:***\n", adminPath, flags.User)
 	if len(flags.OpenScopes) > 0 {
 		fmt.Printf("Open scopes: %v\n", flags.OpenScopes)
 	}

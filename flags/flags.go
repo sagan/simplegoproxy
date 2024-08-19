@@ -11,6 +11,7 @@ const DEFAULT_PORT = 8380 // ASCII (Decimal) 'SP' (83 + 80)
 var (
 	Addr                string
 	Sign                bool
+	Decrypt             bool
 	Log                 bool
 	Encrypt             bool
 	Cors                bool
@@ -57,6 +58,7 @@ func init() {
 	flag.BoolVar(&Log, "log", false, "Log every request urls")
 	flag.BoolVar(&SupressError, "supress-error", false, "Supress error display, send a 404 to client instead")
 	flag.BoolVar(&Encrypt, "encrypt", false, `Used with "-sign", encrypt generated entrypoint url`)
+	flag.BoolVar(&Decrypt, "decrypt", false, `Decrypt the encrypted url(s)`)
 	flag.BoolVar(&EnableUnix, "enable-unix", false,
 		`Enable unix domain socket url: "unix:///path/to/socket:http://server/path"`)
 	flag.BoolVar(&EnableFile, "enable-file", false, `Enable file scheme url: "file:///path/to/file"`)

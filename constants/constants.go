@@ -1,8 +1,16 @@
 package constants
 
+import "regexp"
+
 const DEFAULT_MIME = "application/octet-stream"
 const MIME_TXT = "text/plain; charset=utf-8"
 const MIME_HTML = "text/html; charset=utf-8"
+
+// seconds of 1 years, aka: infinite.
+const INFINITE_TIMEOUT = 86400 * 365 * 100
+
+// match with a encrypted url base62 string
+var EncryptedUrlRegex = regexp.MustCompile(`^[a-zA-Z0-9]{18,}$`)
 
 // Copied from Chrome file:// url dir index page.
 // Go html/template format.

@@ -23,6 +23,7 @@ type ApiFunc func(params url.Values) (data any, err error)
 
 var ApiFuncs = map[string]ApiFunc{
 	"generate": Generate,
+	"decrypt":  Decrypt,
 }
 
 var GetHttpHandle = func() http.Handler {
@@ -110,6 +111,18 @@ func Generate(params url.Values) (data any, err error) {
 		"entryurl":           entryurl,
 		"encrypted_entryurl": encryptedEntryurl,
 		"sign":               sign,
+	}
+	return data, nil
+}
+
+func Decrypt(params url.Values) (any, error) {
+	url, encrypted_entryurl, err := proxy.Decrypt(params.Get("encryptedurl"), params.Get("publicurl"))
+	if err != nil {
+		return nil, err
+	}
+	data := map[string]any{
+		"url":                url,
+		"encrypted_entryurl": encrypted_entryurl,
 	}
 	return data, nil
 }
