@@ -18,9 +18,13 @@ interface InputForm {
   nocsp: boolean;
   fdua: boolean;
   fdauth: boolean;
+  fdmethod: boolean;
+  fdbody: boolean;
+  fdtype: boolean;
   debug: boolean;
   addon: string;
   scope: string;
+  method: string;
   timeout: number;
 }
 
@@ -43,7 +47,13 @@ export default function Home({}) {
   const [copiedIndex, setCopiedIndex] = useState(-1);
   const [filter, setFilter] = useState("");
   const [showbody, setShowbody] = useState(!!searchParams.get("body"));
-  const [showresbody, setShowresbody] = useState(!!searchParams.get("resbody"));
+  const [showresbody, setShowresbody] = useState(
+    !!searchParams.get("method") ||
+      !!searchParams.get("resbody") ||
+      !!searchParams.get("fdmethod") ||
+      !!searchParams.get("fdbody") ||
+      !!searchParams.get("fdtype")
+  );
   const filter_lowercase = filter.toLowerCase();
   let encrypt = !!searchParams.get("encrypt");
   return (
@@ -222,26 +232,67 @@ export default function Home({}) {
             &nbsp;ResBody
           </label>
         </p>
-        <p className="flex">
-          {showbody && (
+        {showbody && (
+          <p className="flex">
             <textarea
               className="flex-1"
               placeholder="body"
               defaultValue={searchParams.get("body") || ""}
               {...register("body")}
             />
-          )}
-        </p>
-        <p className="flex">
-          {showresbody && (
-            <textarea
-              className="flex-1"
-              placeholder="resbody"
-              defaultValue={searchParams.get("resbody") || ""}
-              {...register("resbody")}
-            />
-          )}
-        </p>
+          </p>
+        )}
+        {showresbody && (
+          <>
+            <p className="flex">
+              <label title="Forward http request method">
+                Method&nbsp;
+                <select
+                  defaultValue={searchParams.get("method")}
+                  {...register("method")}
+                >
+                  <option value="">(Default)</option>
+                  <option value="GET">GET</option>
+                  <option value="PUT">PUT</option>
+                  <option value="POST">POST</option>
+                  <option value="DELETE">DELETE</option>
+                </select>
+              </label>
+              <label title="Forward http request method">
+                <input
+                  defaultChecked={!!searchParams.get("fdmethod")}
+                  type="checkbox"
+                  {...register("fdmethod")}
+                />
+                &nbsp;Forward Method
+              </label>
+              <label title="Forward http request body">
+                <input
+                  defaultChecked={!!searchParams.get("fdbody")}
+                  type="checkbox"
+                  {...register("fdbody")}
+                />
+                &nbsp;Forward Body
+              </label>
+              <label title="Forward http request Content-Type">
+                <input
+                  defaultChecked={!!searchParams.get("fdtype")}
+                  type="checkbox"
+                  {...register("fdtype")}
+                />
+                &nbsp;Forward Content-Type
+              </label>
+            </p>
+            <p className="flex">
+              <textarea
+                className="flex-1"
+                placeholder="resbody"
+                defaultValue={searchParams.get("resbody") || ""}
+                {...register("resbody")}
+              />
+            </p>
+          </>
+        )}
       </form>
       <div className="flex-1 overflow-auto">
         <h2 className="flex">
@@ -353,6 +404,10 @@ export default function Home({}) {
                             addon: "",
                             scope: "",
                             timeout: 0,
+                            fdmethod: false,
+                            fdbody: false,
+                            fdtype: false,
+                            method: "",
                           };
                           let params: string[][] = [];
                           for (const [key, value] of urlObj.searchParams) {
@@ -388,6 +443,39 @@ export default function Home({}) {
                               if (values.addon != "") {
                                 values.addon += "&";
                               }
+                              if (key == "fdheaders") {
+                                let fdheaders = value.split(/\s*,\s*/);
+                                let i = -1;
+                                i = fdheaders.indexOf("Authorization");
+                                if (i != -1) {
+                                  values.fdauth = true;
+                                  fdheaders.splice(i, 1);
+                                }
+                                i = fdheaders.indexOf("Content-Type");
+                                if (i != -1) {
+                                  values.fdtype = true;
+                                  fdheaders.splice(i, 1);
+                                }
+                                i = fdheaders.indexOf("User-Agent");
+                                if (i != -1) {
+                                  values.fdua = true;
+                                  fdheaders.splice(i, 1);
+                                }
+                                i = fdheaders.indexOf(":method");
+                                if (i != -1) {
+                                  values.fdmethod = true;
+                                  fdheaders.splice(i, 1);
+                                }
+                                i = fdheaders.indexOf(":body");
+                                if (i != -1) {
+                                  values.fdbody = true;
+                                  fdheaders.splice(i, 1);
+                                }
+                                value = fdheaders.join(",");
+                                if (value == "") {
+                                  continue;
+                                }
+                              }
                               values.addon +=
                                 key + "=" + encodeURIComponent(value);
                             }
@@ -398,6 +486,10 @@ export default function Home({}) {
                           };
                           setValue("fdua", values.fdua, option);
                           setValue("fdauth", values.fdauth, option);
+                          setValue("fdmethod", values.fdmethod, option);
+                          setValue("fdbody", values.fdbody, option);
+                          setValue("fdtype", values.fdtype, option);
+                          setValue("method", values.method, option);
                           setValue("cors", values.cors, option);
                           setValue("nocsp", values.nocsp, option);
                           setValue("debug", values.debug, option);
@@ -427,7 +519,7 @@ export default function Home({}) {
 }
 
 function makeUrl(data: InputForm, prefix: string): string {
-  let { url, fdua, fdauth, addon, ...others } = data;
+  let { url, fdua, fdauth, fdmethod, fdbody, fdtype, addon, ...others } = data;
   // Unlike go's url.Parse, JavaScript's URL refues to handle schemeless url
   url = url.trim();
   if (
@@ -466,6 +558,15 @@ function makeUrl(data: InputForm, prefix: string): string {
   }
   if (fdauth && fdheaders.indexOf("Authorization") == -1) {
     fdheaders.push("Authorization");
+  }
+  if (fdtype && fdheaders.indexOf("Content-Type") == -1) {
+    fdheaders.push("Content-Type");
+  }
+  if (fdmethod && fdheaders.indexOf(":method") == -1) {
+    fdheaders.push(":method");
+  }
+  if (fdbody && fdheaders.indexOf(":body") == -1) {
+    fdheaders.push(":body");
   }
   if (fdheaders.length > 0) {
     urlObj.searchParams.set(FDHEADERS, fdheaders.join(","));
