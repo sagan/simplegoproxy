@@ -24,6 +24,8 @@ interface InputForm {
   timeout: number;
 }
 
+const URL_LENGTH_LIMIT = 2048;
+
 export default function Home({}) {
   const {
     register,
@@ -39,8 +41,10 @@ export default function Home({}) {
   );
   let [searchParams, setSearchParams] = useSearchParams();
   const [copiedIndex, setCopiedIndex] = useState(-1);
+  const [filter, setFilter] = useState("");
   const [showbody, setShowbody] = useState(!!searchParams.get("body"));
   const [showresbody, setShowresbody] = useState(!!searchParams.get("resbody"));
+  const filter_lowercase = filter.toLowerCase();
   let encrypt = !!searchParams.get("encrypt");
   return (
     <>
@@ -242,18 +246,26 @@ export default function Home({}) {
       <div className="flex-1 overflow-auto">
         <h2 className="flex">
           <span className="flex-1">Generated Urls (Stored locally)</span>
-          <button
-            type="button"
-            onClick={() => {
-              if (!confirm("Clear history?")) {
-                return;
-              }
-              setUrls([]);
-              setCopiedIndex(-1);
-            }}
-          >
-            XX
-          </button>
+          <span>
+            <input
+              type="text"
+              placeholder="filter"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirm("Clear history?")) {
+                  return;
+                }
+                setUrls([]);
+                setCopiedIndex(-1);
+              }}
+            >
+              XX
+            </button>
+          </span>
         </h2>
         <table className="mt-1">
           <thead>
@@ -274,14 +286,28 @@ export default function Home({}) {
               ) {
                 accessurl = url.encrypted_entryurl;
               }
+              let display =
+                index == urls.length ||
+                url.url.toLowerCase().indexOf(filter_lowercase) != -1;
+              if (!display) {
+                return null;
+              }
               return (
                 <tr key={i}>
                   <td>{index}</td>
                   <td>
-                    <a href={url.url}>{url.url}</a>
+                    <a href={url.url}>
+                      {url.url.length > URL_LENGTH_LIMIT
+                        ? url.url.substring(0, URL_LENGTH_LIMIT) + "..."
+                        : url.url}
+                    </a>
                   </td>
                   <td>
-                    <a href={accessurl}>{accessurl}</a>
+                    <a href={accessurl}>
+                      {accessurl.length > URL_LENGTH_LIMIT
+                        ? accessurl.substring(0, URL_LENGTH_LIMIT) + "..."
+                        : accessurl}
+                    </a>
                   </td>
                   <td>
                     <button

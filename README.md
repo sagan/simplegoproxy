@@ -156,7 +156,11 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_resbody=<value>` : Set the response body template.
 - `_sgp_resbodytype=<value>` : The original response body type, e.g. json, xml, yaml, toml.
-- `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. A special `*` value can be used to forward ALL request headers. The following headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`; A special "\n" (`%0A`) value supresses this behavior and makes sure no headers would be forwarded.
+- `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. By default some headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`. Some values have special meanings:
+  - `*`: ALL request headers.
+  - `%0A` (\n) : Supresses default forwarding headers and makes sure no headers would be forwarded.
+  - `:method` : Forward the http request method. Use the incoming method to the entrypoint url as the one sent to the target url.
+  - `:body` : Forward the http request body. Use the incoming body to the entrypoint url as the one sent to the target url.
 - `_sgp_user=username:password` : Set the authentication username & password for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below "Impersonate the Browser" section.
 - `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.

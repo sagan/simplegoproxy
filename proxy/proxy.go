@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	htmlTemplate "html/template"
 	"io"
 	"log"
 	"mime"
@@ -65,6 +66,10 @@ const (
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
 )
+
+type Template interface {
+	Execute(wr io.Writer, data any) error
+}
 
 var (
 	TEXTUAL_MIMES = []string{
@@ -238,7 +243,9 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	user := ""
 	fdheaders := ""
 	body := ""
-	var resBodyTemplate *template.Template
+	forwardBody := false
+	templateContents := ""
+	var resBodyTemplate Template
 	contentType := ""
 	responseContentType := ""
 	responseBodyType := ""
@@ -286,9 +293,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		case BODY_STRING:
 			body = value
 		case RESBODY_STRING:
-			if resBodyTemplate, err = template.New("template").Parse(value); err != nil {
-				return nil, fmt.Errorf("invalid template: %v", err)
-			}
+			templateContents = value
 		case TYPE_STRING:
 			contentType = value
 		case RESTYPE_STRING:
@@ -360,6 +365,16 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srReq.Header.Get("Origin"), origines)
 	}
+	if templateContents != "" {
+		if responseContentType == "" || responseContentType == "html" {
+			resBodyTemplate, err = htmlTemplate.New("template").Parse(templateContents)
+		} else {
+			resBodyTemplate, err = template.New("template").Parse(templateContents)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid template: %v", err)
+		}
+	}
 
 	if urlObj.Scheme != "data" {
 		if signkey != "" {
@@ -418,9 +433,6 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		if contentType != "" {
 			header.Set("Content-Type", util.Mime(contentType))
 		}
-		if header.Get("Content-Type") == "" && method == http.MethodPost && body != "" {
-			header.Set("Content-Type", "application/x-www-form-urlencoded")
-		}
 		forwardHeaders := []string{"If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
 			"If-Unmodified-Since", "Range"}
 		if fdheaders != "" {
@@ -435,10 +447,25 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			}
 		}
 		for _, h := range forwardHeaders {
-			if len(header.Values(h)) > 0 || len(srReq.Header.Values(h)) == 0 {
-				continue
+			// http2 pseudo header style
+			if strings.HasPrefix(h, ":") {
+				switch h {
+				case ":method":
+					method = srReq.Method
+				case ":body":
+					forwardBody = true
+				default:
+					return nil, fmt.Errorf("invalid fdheader %q", h)
+				}
+			} else {
+				if len(header.Values(h)) > 0 || len(srReq.Header.Values(h)) == 0 {
+					continue
+				}
+				header[h] = srReq.Header[h]
 			}
-			header[h] = srReq.Header[h]
+		}
+		if header.Get("Content-Type") == "" && method == http.MethodPost && body != "" {
+			header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 
 		if signkey != "" && !openMode {
@@ -473,7 +500,9 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		}
 	} else {
 		var reqBody io.Reader
-		if body != "" {
+		if forwardBody && srReq.Body != nil {
+			reqBody = srReq.Body
+		} else if body != "" {
 			reqBody = strings.NewReader(body)
 		}
 		req, err = http.NewRequestWithContext(srReq.Context(), method, urlStr, reqBody)
@@ -537,9 +566,13 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	}
 
 	if resBodyTemplate != nil {
-		var request = map[string]any{"header": http.Header{}}
+		var request = map[string]any{}
 		if req != nil {
+			request["method"] = req.Method
 			request["header"] = req.Header
+		} else {
+			request["method"] = http.MethodGet
+			request["header"] = http.Header{}
 		}
 		var response = map[string]any{
 			"status": res.StatusCode,
