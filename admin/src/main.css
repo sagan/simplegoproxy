@@ -54,6 +54,7 @@ tr td:not(:last-child) {
   padding-right: 5px;
 }
 
+span > *:not(:last-child),
 p > *:not(:last-child),
 td > *:not(:last-child) {
   margin-right: 10px;

@@ -296,16 +296,19 @@ export default function Home({}) {
       </form>
       <div className="flex-1 overflow-auto">
         <h2 className="flex">
-          <span className="flex-1">Generated Urls (Stored locally)</span>
-          <span>
+          <span className="flex-1">
+            <span>Generated Urls (Stored locally)</span>
             <input
-              type="text"
+              type="search"
               placeholder="filter"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
+          </span>
+          <span>
             <button
               type="button"
+              title="Delete all records"
               onClick={() => {
                 if (!confirm("Clear history?")) {
                   return;
@@ -381,6 +384,11 @@ export default function Home({}) {
                         }
                         let newUrls = urls.slice();
                         newUrls.splice(i, 1);
+                        if (copiedIndex == index) {
+                          setCopiedIndex(-1);
+                        } else if (copiedIndex > index) {
+                          setCopiedIndex(copiedIndex - 1);
+                        }
                         setUrls(newUrls);
                       }}
                     >
