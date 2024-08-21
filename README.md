@@ -34,6 +34,7 @@ TOC
   - [Scope signing](#scope-signing)
   - [Open scopes](#open-scopes)
   - [URL encryption](#url-encryption)
+  - [Response body encrpytion](#response-body-encrpytion)
   - [Referer restrictions](#referer-restrictions)
   - [Origin restrictions](#origin-restrictions)
   - [Error Suppressions and Logging](#error-suppressions-and-logging)
@@ -164,8 +165,9 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_user=username:password` : Set the authentication username & password for request. It can also be directly set in target url via "https://user:password@example.com" syntax.
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below "Impersonate the Browser" section.
 - `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.
-- `_sgp_keytype` : The sign key type. See below "Signing key type" section.
+- `_sgp_keytype=<value>` : The sign key type. See below "Signing key type" section.
 - `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
+- `_sgp_respass=<value>` : The password to encrypt response body. See below "Response body encrpytion" section.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
 - `_sgp_validbefore=<value>`, `_sgp_validafter=<value>` : If set, the entrypoint url can only be used before or after this time accordingly. Value can be any of below time formats: `2006-01-02`, `2006-01-02T15:04:05` `2006-01-02T15:04:05-07:00`, `2006-01-02T15:04:05Z`. All but the last format are parsed in local timezone. The last one are parsed as UTC time. Note to enforce these restrictions, "Request signing" must be enabled.
@@ -400,6 +402,48 @@ To get the encrypted form entrypoint url, use the `-encrypt` flag with `-sign` w
 Note the "Modification parameters fronting" does not work with URL encryption -- the whole target url with all query parameters will be encrypted. The encrypted entrypoint url contains only one path segment, e.g.: `http://localhost:8380/abcdefghijklmnopqrstuvwxyz`.
 
 The target urls are encrypted using "key" flag value as the cryptographic key. If you change the key, all previously generated entrypoint urls will be inaccessible.
+
+### Response body encrpytion
+
+If "URL encryption" is used and the `_sgp_respass=<value>` parameter is set, Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`.
+
+To decrypt the encrypted response body, see below examples.
+
+JavaScript (Browser & Node.js):
+
+```javascript
+/**
+ * Decrypt the encrypted response body sent by Simplegoproxy. Works in browser and node.js.
+ * @param string ciphertext base64 encoded ciphertext(with iv as prefix)
+ * @param string password
+ * @return Promise<string> plaintext
+ */
+async function aesGcmDecrypt(ciphertext, password) {
+  const keymaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits", "deriveKey"]
+  );
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: new Uint8Array(),
+      iterations: 1000000,
+      hash: "SHA-256",
+    },
+    keymaterial,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  const cipherdata = Uint8Array.from(atob(ciphertext), (m) => m.codePointAt(0));
+  const alg = { name: "AES-GCM", iv: cipherdata.slice(0, 12) };
+  const plaindata = await crypto.subtle.decrypt(alg, key, cipherdata.slice(12));
+  return new TextDecoder().decode(plaindata);
+}
+```
 
 ### Referer restrictions
 

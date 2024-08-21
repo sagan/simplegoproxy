@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -495,10 +496,10 @@ func fetchCurl(netreq *NetRequest) (res *http.Response, err error) {
 	}
 	if req.Body != nil {
 		data, err := io.ReadAll(req.Body)
+		req.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read request body: %v", err)
 		}
-		req.Body.Close()
 		if len(data) > 0 {
 			args = append(args, "--data-raw", string(data))
 		}
@@ -1031,15 +1032,24 @@ func processResponse(body io.ReadCloser, err error, okMime string) *http.Respons
 	}
 }
 
-// Encrypt data using cipher, return base62 string of nonce+cipherdata
-func EncryptToString(cipher cipher.AEAD, plaindata []byte) (cipherstring string) {
+// Encrypt data using cipher, return []byte
+func Encrypt(cipher cipher.AEAD, plaindata []byte) (cipherstring []byte) {
 	nonce := make([]byte, cipher.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		panic(err.Error())
 	}
 	cipherdata := cipher.Seal(nonce, nonce, plaindata, nil)
-	data := base62.EncodeToString(cipherdata)
-	return data
+	return cipherdata
+}
+
+// Encrypt data using cipher, return base62 string of nonce+cipherdata
+func EncryptToString(cipher cipher.AEAD, plaindata []byte) (cipherstring string) {
+	return base62.EncodeToString(Encrypt(cipher, plaindata))
+}
+
+// Encrypt data using cipher, return base64 string of nonce+cipherdata
+func EncryptToBase64String(cipher cipher.AEAD, plaindata []byte) (cipherstring string) {
+	return base64.StdEncoding.EncodeToString(Encrypt(cipher, plaindata))
 }
 
 // ciphertext should be the result of EncryptToString

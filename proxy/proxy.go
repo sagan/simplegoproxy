@@ -62,6 +62,7 @@ const (
 	KEYTYPE_STRING         = "keytype"
 	VALIDBEFORE_STRING     = "validbefore"
 	VALIDAFTER_STRING      = "validafter"
+	RESPASS_STRING         = "respass"
 	DEBUG_STRING           = "debug"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
@@ -144,20 +145,18 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		targetUrlObj.Scheme = "https"
 	}
 	queryParams := url.Values{}
-	if targetUrlObj.Scheme != "data" {
-		if targetUrlObj.Host != "" && targetUrlObj.Path == "" {
-			targetUrlObj.Path = "/"
-		}
-		targetUrlQuery := targetUrlObj.Query()
-		for key, values := range reqUrlQuery {
-			if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {
-				queryParams[key[len(prefix):]] = values
-			} else {
-				targetUrlQuery[key] = values
-			}
-		}
-		targetUrlObj.RawQuery = targetUrlQuery.Encode()
+	if targetUrlObj.Host != "" && targetUrlObj.Path == "" {
+		targetUrlObj.Path = "/"
 	}
+	targetUrlQuery := targetUrlObj.Query()
+	for key, values := range reqUrlQuery {
+		if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {
+			queryParams[key[len(prefix):]] = values
+		} else if targetUrlObj.Scheme != "data" {
+			targetUrlQuery[key] = values
+		}
+	}
+	targetUrlObj.RawQuery = targetUrlQuery.Encode()
 	for key, values := range modparams {
 		if !strings.HasPrefix(key, prefix) || len(key) <= len(prefix) {
 			sendError(w, r, supressError, doLog, "Invalid modparam %q", key)
@@ -195,7 +194,11 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 				sendError(w, r, supressError, doLog, "exec url is not enabled")
 				return
 			}
-		case "http", "https", "data": // do nothing
+		case "http", "https", "data":
+			if queryParams.Has(RESPASS_STRING) && !encryptUrlMode {
+				sendError(w, r, supressError, doLog, "url with respass must be accessed via encrypted url")
+				return
+			}
 		default:
 			sendError(w, r, supressError, doLog, "unsupported url scheme %q", targetUrlObj.Scheme)
 			return
@@ -252,13 +255,15 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	method := http.MethodGet
 	keytype := ""
 	sign := ""
+	// password to encrypt final response body to client
+	var respass = ""
 	var scopes []string
 	var referers []string
 	var origines []string
 	now := time.Now().Unix()
 	for key, values := range queryParams {
 		value := values[0]
-		if signkey != "" && !openMode {
+		if signkey != "" && !openMode && urlObj.Scheme != "data" {
 			value = applySecrets(value)
 		}
 		switch key {
@@ -280,6 +285,11 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			nocache = true
 		case PROXY_STRING:
 			proxy = value
+		case RESPASS_STRING:
+			respass = value
+			if respass != "" && signkey == "" {
+				return nil, fmt.Errorf("respass can only be used when request signing is enabled")
+			}
 		case IMPERSONATE_STRING:
 			impersonate = value
 		case COOKIE_STRING:
@@ -468,7 +478,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 
-		if signkey != "" && !openMode {
+		if signkey != "" && !openMode && urlObj.Scheme != "data" {
 			// only do secret substitution if request signing is enabled
 			urlQuery := urlObj.Query()
 			for key, values := range urlQuery {
@@ -585,7 +595,9 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		}
 		var body []byte
 		if res.Body != nil {
-			if body, err = io.ReadAll(res.Body); err != nil {
+			body, err = io.ReadAll(res.Body)
+			res.Body.Close()
+			if err != nil {
 				return util.ErrResponseMsg("Failed to read body: %v", err), nil
 			}
 		}
@@ -618,6 +630,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			res.Body = io.NopCloser(buf)
 			if responseContentType == "" {
 				res.Header.Set("Content-Type", constants.MIME_HTML)
+				res.Header.Del("Content-Length")
 			}
 		}
 	} else if len(subs) > 0 && res.Body != nil {
@@ -632,6 +645,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		}
 		if doSub {
 			body, err := io.ReadAll(res.Body)
+			res.Body.Close()
 			if err != nil {
 				return util.ErrResponseMsg("Failed to read body: %v", err), nil
 			} else {
@@ -639,9 +653,25 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 				for sub, replace := range subs {
 					data = strings.ReplaceAll(data, sub, replace)
 				}
+				res.Header.Del("Content-Length")
 				res.Body = io.NopCloser(strings.NewReader(data))
 			}
 		}
+	}
+
+	if respass != "" {
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			return util.ErrResponseMsg("Failed to read body: %v", err), nil
+		}
+		cipher, err := util.GetDeterministicCipher(respass)
+		if err != nil {
+			return util.ErrResponseMsg("Failed to get resbody cipher: %v", err), nil
+		}
+		res.Header.Set("Content-Type", constants.MIME_TXT)
+		res.Header.Del("Content-Length")
+		res.Body = io.NopCloser(strings.NewReader(util.EncryptToBase64String(cipher, body)))
 	}
 
 	return res, nil
@@ -726,27 +756,33 @@ func Generate(targetUrl, key, publicurl, prefix string,
 		signstr = canonicalurl
 	}
 	if key != "" {
-		mac := hmac.New(sha256.New, []byte(Realkey(key, keytype)))
-		mac.Write([]byte(signstr))
-		sign = hex.EncodeToString(mac.Sum(nil))
-		sgpQuery.Set(prefix+SIGN_STRING, sign)
-		if publicurl != "" {
-			if normalUrl != "" {
-				entryurl = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(publicurl, "/"), sgpQuery.Encode(), normalUrl)
-			} else {
-				if keytype != "" {
-					entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
-						prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
+		if urlObj.Scheme != "data" {
+			mac := hmac.New(sha256.New, []byte(Realkey(key, keytype)))
+			mac.Write([]byte(signstr))
+			sign = hex.EncodeToString(mac.Sum(nil))
+			sgpQuery.Set(prefix+SIGN_STRING, sign)
+			if publicurl != "" {
+				if normalUrl != "" {
+					entryurl = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(publicurl, "/"), sgpQuery.Encode(), normalUrl)
 				} else {
-					entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
-						prefix, SIGN_STRING, sign, canonicalurl)
+					if keytype != "" {
+						entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+							prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
+					} else {
+						entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+							prefix, SIGN_STRING, sign, canonicalurl)
+					}
 				}
 			}
+		} else {
+			entryurl = fmt.Sprintf("%s/%s", strings.TrimSuffix(publicurl, "/"), canonicalurl)
 		}
 		if cipher != nil {
 			if canonicalurlObj, err := url.Parse(canonicalurl); err == nil {
 				query := canonicalurlObj.Query()
-				query.Set(prefix+SIGN_STRING, sign)
+				if sign != "" {
+					query.Set(prefix+SIGN_STRING, sign)
+				}
 				canonicalurlObj.RawQuery = query.Encode()
 				encryptedurl = util.EncryptToString(cipher, []byte(canonicalurlObj.String()))
 				encryptedEntryurl = strings.TrimSuffix(publicurl, "/") + "/" + encryptedurl

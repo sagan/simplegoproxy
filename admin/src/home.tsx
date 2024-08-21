@@ -25,6 +25,7 @@ interface InputForm {
   addon: string;
   scope: string;
   method: string;
+  respass: string;
   timeout: number;
 }
 
@@ -52,7 +53,8 @@ export default function Home({}) {
       !!searchParams.get("resbody") ||
       !!searchParams.get("fdmethod") ||
       !!searchParams.get("fdbody") ||
-      !!searchParams.get("fdtype")
+      !!searchParams.get("fdtype") ||
+      !!searchParams.get("respass")
   );
   const filter_lowercase = filter.toLowerCase();
   let encrypt = !!searchParams.get("encrypt");
@@ -151,7 +153,7 @@ export default function Home({}) {
               type="checkbox"
               {...register("cors")}
             />
-            &nbsp;cors
+            &nbsp;Cors
           </label>
           <label title="Remove the Content Security Policy (CSP) headers from original response">
             <input
@@ -186,7 +188,7 @@ export default function Home({}) {
             &nbsp;Debug
           </label>
           <label>
-            timeout:&nbsp;
+            Timeout:&nbsp;
             <input
               type="number"
               defaultValue={parseInt(searchParams.get("timeout")) || 0}
@@ -194,21 +196,21 @@ export default function Home({}) {
             />
           </label>
           <label>
-            keytype:&nbsp;
+            Keytype:&nbsp;
             <input
               defaultValue={searchParams.get("keytype") || ""}
               {...register("keytype")}
             />
           </label>
           <label>
-            scope:&nbsp;
+            Scope:&nbsp;
             <input
               defaultValue={searchParams.get("scope") || ""}
               {...register("scope")}
             />
           </label>
           <label className="flex flex-1">
-            <span>addon:&nbsp;</span>
+            <span>Addon:&nbsp;</span>
             <input
               defaultValue={searchParams.get("addon") || ""}
               className="flex-1"
@@ -245,7 +247,7 @@ export default function Home({}) {
         {showresbody && (
           <>
             <p className="flex">
-              <label title="Forward http request method">
+              <label title="Http request method">
                 Method&nbsp;
                 <select
                   defaultValue={searchParams.get("method")}
@@ -281,6 +283,13 @@ export default function Home({}) {
                   {...register("fdtype")}
                 />
                 &nbsp;Forward Content-Type
+              </label>
+              <label title="Password to encrypt response body">
+                Respass:&nbsp;
+                <input
+                  defaultValue={searchParams.get("respass") || ""}
+                  {...register("respass")}
+                />
               </label>
             </p>
             <p className="flex">
@@ -416,6 +425,7 @@ export default function Home({}) {
                             fdbody: false,
                             fdtype: false,
                             method: "",
+                            respass: "",
                           };
                           let params: string[][] = [];
                           for (const [key, value] of urlObj.searchParams) {
@@ -498,6 +508,7 @@ export default function Home({}) {
                           setValue("fdbody", values.fdbody, option);
                           setValue("fdtype", values.fdtype, option);
                           setValue("method", values.method, option);
+                          setValue("respass", values.respass, option);
                           setValue("cors", values.cors, option);
                           setValue("nocsp", values.nocsp, option);
                           setValue("debug", values.debug, option);

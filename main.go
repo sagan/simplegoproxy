@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/sagan/simplegoproxy/admin"
@@ -35,6 +36,9 @@ func main() {
 			}
 		}
 	})
+	if regexp.MustCompile(`^\d+$`).MatchString(flags.Addr) {
+		flags.Addr = ":" + flags.Addr
+	}
 	if flags.EnableAll {
 		flags.EnableUnix = true
 		flags.EnableFile = true
