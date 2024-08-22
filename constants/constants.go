@@ -2,6 +2,8 @@ package constants
 
 import "regexp"
 
+const SGP_ENV_PREFIX = "SGP_"
+
 const DEFAULT_MIME = "application/octet-stream"
 const MIME_TXT = "text/plain; charset=utf-8"
 const MIME_HTML = "text/html; charset=utf-8"

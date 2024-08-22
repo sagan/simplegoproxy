@@ -64,3 +64,15 @@ label:has(input[type="checkbox"]) {
   user-select: none;
   cursor: pointer;
 }
+
+table.urls > tbody > tr:nth-child(odd) {
+  background-color: aliceblue;
+}
+
+table.urls > tbody > tr:nth-child(even) {
+  background-color: bisque;
+}
+
+label.active {
+  color: #0366d6;
+}

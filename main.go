@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sagan/simplegoproxy/admin"
+	"github.com/sagan/simplegoproxy/constants"
 	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/proxy"
 	"github.com/sagan/simplegoproxy/util"
@@ -28,7 +29,7 @@ func main() {
 		if flagsSet[f.Name] {
 			return
 		}
-		envname := "SGP_" + strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
+		envname := constants.SGP_ENV_PREFIX + strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
 		if envValue := os.Getenv(envname); envValue != "" {
 			err := f.Value.Set(envValue)
 			if err != nil {

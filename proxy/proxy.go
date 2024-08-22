@@ -226,6 +226,15 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 
 func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, prefix, signkey string,
 	keytypeBlacklist, openScopes []string, rcloneBinary, rcloneConfig string, doLog bool) (*http.Response, error) {
+	isSigned := queryParams.Get(SIGN_STRING) != ""
+	if isSigned && signkey == "" {
+		return nil, fmt.Errorf("url is signed but signkey is not set")
+	}
+	if !isSigned && signkey != "" && urlObj.Scheme != "data" &&
+		!util.MatchUrlPatterns(openScopes, urlObj.String(), false) {
+		return nil, fmt.Errorf(`sign is required but not found`)
+	}
+
 	var err error
 	header := http.Header{}
 	responseHeaders := map[string]string{}
@@ -237,8 +246,6 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	nocache := false
 	norf := false // no redirect following
 	debug := false
-	// current url does not require (enforce) signing, but will disable env secret if not signed
-	openMode := util.MatchUrlPatterns(openScopes, urlObj.String(), false)
 	proxy := ""
 	impersonate := ""
 	timeout := int64(0)
@@ -263,8 +270,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	now := time.Now().Unix()
 	for key, values := range queryParams {
 		value := values[0]
-		if signkey != "" && !openMode && urlObj.Scheme != "data" {
-			value = applySecrets(value)
+		if isSigned && key != SIGN_STRING && key != KEYTYPE_STRING {
+			value = applyEnv(value)
 		}
 		switch key {
 		case ARG_SRING, ARGS_SRING:
@@ -386,50 +393,50 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		}
 	}
 
-	if urlObj.Scheme != "data" {
-		if signkey != "" {
-			signUrlQuery := urlObj.Query()
-			for key, values := range queryParams {
-				if key != SIGN_STRING && key != KEYTYPE_STRING {
-					signUrlQuery[prefix+key] = values
-				}
-			}
-			urlObj.RawQuery = signUrlQuery.Encode()
-			signUrl := urlObj.String()
-			if sign != "" {
-				if len(scopes) > 0 {
-					targetUrlQuery := url.Values{}
-					for key, values := range signUrlQuery {
-						if !strings.HasPrefix(key, prefix) {
-							signUrlQuery.Del(key)
-							targetUrlQuery[key] = values
-						}
-					}
-					urlObj.RawQuery = targetUrlQuery.Encode()
-					signUrl = "?" + signUrlQuery.Encode()
-					if targetUrl := urlObj.String(); !util.MatchUrlPatterns(scopes, targetUrl, false) {
-						return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
-					}
-				}
-				if keytype != "" {
-					if slices.Contains(keytypeBlacklist, keytype) {
-						return nil, fmt.Errorf("keytype %q is revoked", keytype)
-					}
-				}
-				messageMAC, err := hex.DecodeString(sign)
-				if err != nil {
-					return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
-				}
-				mac := hmac.New(sha256.New, []byte(Realkey(signkey, keytype)))
-				mac.Write([]byte(signUrl))
-				expectedMAC := mac.Sum(nil)
-				if !hmac.Equal(messageMAC, expectedMAC) {
-					return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
-				}
-			} else if !openMode {
-				return nil, fmt.Errorf(`sign is required but not found`)
+	// In the beginning of this func, it already checks if sign is required but not signed.
+	// So here it only checks if signed, whether the sign is valid.
+	if isSigned {
+		signUrlQuery := urlObj.Query()
+		for key, values := range queryParams {
+			if key != SIGN_STRING && key != KEYTYPE_STRING {
+				signUrlQuery[prefix+key] = values
 			}
 		}
+		urlObj.RawQuery = signUrlQuery.Encode()
+		signUrl := urlObj.String()
+		if urlObj.Scheme != "data" && len(scopes) > 0 {
+			targetUrlQuery := url.Values{}
+			for key, values := range signUrlQuery {
+				if !strings.HasPrefix(key, prefix) {
+					signUrlQuery.Del(key)
+					targetUrlQuery[key] = values
+				}
+			}
+			urlObj.RawQuery = targetUrlQuery.Encode()
+			signUrl = "?" + signUrlQuery.Encode()
+			if targetUrl := urlObj.String(); !util.MatchUrlPatterns(scopes, targetUrl, false) {
+				return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
+			}
+		}
+		if keytype != "" {
+			if slices.Contains(keytypeBlacklist, keytype) {
+				return nil, fmt.Errorf("keytype %q is revoked", keytype)
+			}
+		}
+		messageMAC, err := hex.DecodeString(sign)
+		if err != nil {
+			return nil, fmt.Errorf(`invalid sign hex string "%s": %v`, sign, err)
+		}
+		mac := hmac.New(sha256.New, []byte(Realkey(signkey, keytype)))
+		mac.Write([]byte(signUrl))
+		expectedMAC := mac.Sum(nil)
+		if !hmac.Equal(messageMAC, expectedMAC) {
+			return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
+		}
+		isSigned = true
+	}
+
+	if urlObj.Scheme != "data" {
 		if urlObj.User != nil {
 			user = urlObj.User.String()
 			urlObj.User = nil
@@ -478,12 +485,12 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 
-		if signkey != "" && !openMode && urlObj.Scheme != "data" {
+		if isSigned {
 			// only do secret substitution if request signing is enabled
 			urlQuery := urlObj.Query()
 			for key, values := range urlQuery {
 				for i := range values {
-					values[i] = applySecrets(values[i])
+					values[i] = applyEnv(values[i])
 				}
 				urlQuery[key] = values
 			}
@@ -492,9 +499,10 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	}
 
 	var req *http.Request
-	urlStr := urlObj.String()
 	var res *http.Response
 	if urlObj.Scheme == "data" {
+		urlObj.RawQuery = ""
+		urlStr := urlObj.String()
 		// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs
 		dataURL, err := dataurl.DecodeString(urlStr)
 		if err != nil {
@@ -509,6 +517,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			Body: io.NopCloser(bytes.NewReader(dataURL.Data)),
 		}
 	} else {
+		urlStr := urlObj.String()
 		var reqBody io.Reader
 		if forwardBody && srReq.Body != nil {
 			reqBody = srReq.Body
@@ -677,12 +686,15 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	return res, nil
 }
 
-var secretRegexp = regexp.MustCompile("__SECRET_[_a-zA-Z][_a-zA-Z0-9]*?__")
+var envRegexp = regexp.MustCompile("__SGPENV_[_a-zA-Z][_a-zA-Z0-9]*?__")
 
-// replace all  __SECRET_ABC__ style substrings with SECRET_ABC env value.
-func applySecrets(str string) string {
-	return secretRegexp.ReplaceAllStringFunc(str, func(s string) string {
-		env := s[2 : len(s)-2]
+// replace all  __SGPENV_ABC__ style substrings with ABC env value.
+func applyEnv(str string) string {
+	return envRegexp.ReplaceAllStringFunc(str, func(s string) string {
+		env := s[9 : len(s)-2]
+		if strings.HasPrefix(env, constants.SGP_ENV_PREFIX) {
+			return s
+		}
 		if variable, ok := os.LookupEnv(env); ok {
 			return variable
 		}
@@ -730,7 +742,7 @@ func Generate(targetUrl, key, publicurl, prefix string,
 		urlQuery.Del(prefix + KEYTYPE_STRING)
 		urlObj.RawQuery = urlQuery.Encode() // query key sorted
 		canonicalurl = urlObj.String()
-		if urlQuery[prefix+SCOPE_STRING] != nil {
+		if urlObj.Scheme != "data" && urlQuery[prefix+SCOPE_STRING] != nil {
 			var scopes []string
 			for _, scope := range urlQuery[prefix+SCOPE_STRING] {
 				if scope != "" {
@@ -756,26 +768,22 @@ func Generate(targetUrl, key, publicurl, prefix string,
 		signstr = canonicalurl
 	}
 	if key != "" {
-		if urlObj.Scheme != "data" {
-			mac := hmac.New(sha256.New, []byte(Realkey(key, keytype)))
-			mac.Write([]byte(signstr))
-			sign = hex.EncodeToString(mac.Sum(nil))
-			sgpQuery.Set(prefix+SIGN_STRING, sign)
-			if publicurl != "" {
-				if normalUrl != "" {
-					entryurl = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(publicurl, "/"), sgpQuery.Encode(), normalUrl)
+		mac := hmac.New(sha256.New, []byte(Realkey(key, keytype)))
+		mac.Write([]byte(signstr))
+		sign = hex.EncodeToString(mac.Sum(nil))
+		sgpQuery.Set(prefix+SIGN_STRING, sign)
+		if publicurl != "" {
+			if normalUrl != "" {
+				entryurl = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(publicurl, "/"), sgpQuery.Encode(), normalUrl)
+			} else {
+				if keytype != "" {
+					entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+						prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
 				} else {
-					if keytype != "" {
-						entryurl = fmt.Sprintf("%s/%s%s=%s&%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
-							prefix, KEYTYPE_STRING, url.QueryEscape(keytype), prefix, SIGN_STRING, sign, canonicalurl)
-					} else {
-						entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
-							prefix, SIGN_STRING, sign, canonicalurl)
-					}
+					entryurl = fmt.Sprintf("%s/%s%s=%s/%s", strings.TrimSuffix(publicurl, "/"),
+						prefix, SIGN_STRING, sign, canonicalurl)
 				}
 			}
-		} else {
-			entryurl = fmt.Sprintf("%s/%s", strings.TrimSuffix(publicurl, "/"), canonicalurl)
 		}
 		if cipher != nil {
 			if canonicalurlObj, err := url.Parse(canonicalurl); err == nil {

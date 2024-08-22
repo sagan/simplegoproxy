@@ -29,7 +29,7 @@ TOC
   - [Set the rootpath](#set-the-rootpath)
   - [Request signing](#request-signing)
   - [Admin UI Authorization](#admin-ui-authorization)
-  - [Secret substitutions](#secret-substitutions)
+  - [Env substitutions](#env-substitutions)
   - [Signing key type](#signing-key-type)
   - [Scope signing](#scope-signing)
   - [Open scopes](#open-scopes)
@@ -201,7 +201,7 @@ Simplegoproxy will print the list of supported targets when starting. Currently 
 
 ### Response template
 
-if `_sgp_resbody` flag is set, Simplegoproxy use it as a [Go template](https://pkg.go.dev/text/template) for renderring response body. E.g.:
+if `_sgp_resbody` parameter is set, Simplegoproxy use it as a [Go template](https://pkg.go.dev/text/template) for renderring response body. E.g.:
 
 ```
 {{.res.status}}
@@ -220,9 +220,9 @@ Available variables:
   - `req.header` : Http request header.
 - `err` : Error encountered, if any.
 
-The `res.data` is parsed according to original http response's content-type header. You can also forcibly specify the type using `_sgp_resbodytype` flag (json / yaml / xml / toml).
+The `res.data` is parsed according to original http response's content-type header. You can also forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
 
-The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` flag to override it.
+The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
 
 ### Admin UI
 
@@ -241,6 +241,8 @@ http://localhost:8380/data:text/html;base64,SGVsbG8sIFdvcmxkIQ==
 ```
 
 Both of above entrypoint urls will output "Hello, World!". The later one will also set the `Content-Type: text/html` response header.
+
+"data:" urls do not require (enforce) signing, but env substitions do not work if a such url is not signed.
 
 ### `unix://`, `file://`, `rclone://`, `curl+*//`, `exec://` urls
 
@@ -306,7 +308,9 @@ simplegoproxy -sign -key abc -publicurl "http://localhost:8380" "https://ipinfo.
 https://ipinfo.io/ip?_sgp_cors=  http://localhost:8380/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors=
 ```
 
-Note the `data:` urls does not need signing, as they do not actually send any network request or have any side effect.
+The `data:` urls does not need signing, as they do not actually send any network request or have any side effect.
+
+It's also possible to make some urls do not require signing, see below "Open scopes" section.
 
 ### Admin UI Authorization
 
@@ -315,13 +319,11 @@ If request signing is enabled, the admin UI will require http basic authorizatio
 - Username: Default is `root`. Can be changed by `-user string` flag.
 - Password: Default use "key" flag as password. Use `-pass string` flag to set standalone password.
 
-### Secret substitutions
+### Env substitutions
 
-If request signing is enabled, all `__SECRET_**__` style substrings in modification parameter value or normal query variable will be replaced with the value of the corresponding `SECRET_**` environment variable, if it exists, when sending request to the target url.
+If the entrypoint url is signed, all `__SGPENV_**__` style substrings in modification parameter value or normal query variable value will be replaced with the value of the corresponding `**` environment variable, if it exists, when sending request to the target url. E.g. `__SGPENV_PATH__` will be replaced by `PATH` env value.
 
-The substitutions occur after the request signing verification.
-
-Note `data:` urls does NOT support secret substitutions.
+The substitutions occur after the url sign verification.
 
 ### Signing key type
 
@@ -385,7 +387,7 @@ When request signing is used, you can define some "open scopes" using `-open-sco
 -open-scope "http://example.com/*"
 ```
 
-This flag can be set multiple times. Target urls of these scopes do not require (enforce) signing. However, secret substitutions will not work if a such scope url is not signed. For convenience, `-open-http` flag can be used to make all http(s) urls do not require signing, equivalent to `-open-scope "*://*"`.
+This flag can be set multiple times. Target urls of these scopes do not require (enforce) signing. However, env substitutions do not work if a such scope url is not signed. For convenience, `-open-http` flag can be used to make all http(s) urls do not require signing, equivalent to `-open-scope "*://*"`.
 
 Example:
 

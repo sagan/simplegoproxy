@@ -47,15 +47,17 @@ export default function Home({}) {
   let [searchParams, setSearchParams] = useSearchParams();
   const [copiedIndex, setCopiedIndex] = useState(-1);
   const [filter, setFilter] = useState("");
-  const [showbody, setShowbody] = useState(!!searchParams.get("body"));
-  const [showresbody, setShowresbody] = useState(
+
+  const activeBody = !!searchParams.get("body");
+  const activeResbody =
     !!searchParams.get("method") ||
-      !!searchParams.get("resbody") ||
-      !!searchParams.get("fdmethod") ||
-      !!searchParams.get("fdbody") ||
-      !!searchParams.get("fdtype") ||
-      !!searchParams.get("respass")
-  );
+    !!searchParams.get("resbody") ||
+    !!searchParams.get("fdmethod") ||
+    !!searchParams.get("fdbody") ||
+    !!searchParams.get("fdtype") ||
+    !!searchParams.get("respass");
+  const [showbody, setShowbody] = useState(activeBody);
+  const [showresbody, setShowresbody] = useState(activeResbody);
   const filter_lowercase = filter.toLowerCase();
   let encrypt = !!searchParams.get("encrypt");
   return (
@@ -102,7 +104,7 @@ export default function Home({}) {
                 );
               }}
             />
-            &nbsp;Encrypt
+            <span>🔒&nbsp;Encrypt</span>
           </label>
           <button type="submit">Generate</button>
           <button
@@ -217,7 +219,10 @@ export default function Home({}) {
               {...register("addon")}
             />
           </label>
-          <label title="Set request body ">
+          <label
+            title="Set request body"
+            className={activeBody ? "active" : ""}
+          >
             <input
               checked={showbody}
               type="checkbox"
@@ -225,7 +230,10 @@ export default function Home({}) {
             />
             &nbsp;Body
           </label>
-          <label title="Set response body ">
+          <label
+            title="Set response body"
+            className={activeResbody ? "active" : ""}
+          >
             <input
               checked={showresbody}
               type="checkbox"
@@ -285,7 +293,7 @@ export default function Home({}) {
                 &nbsp;Forward Content-Type
               </label>
               <label title="Password to encrypt response body">
-                Respass:&nbsp;
+                <span>Respass:&nbsp;🔑</span>
                 <input
                   defaultValue={searchParams.get("respass") || ""}
                   {...register("respass")}
@@ -330,24 +338,34 @@ export default function Home({}) {
             </button>
           </span>
         </h2>
-        <table className="mt-1">
+        <table className="mt-1 urls">
           <thead>
             <tr>
-              <td>#</td>
-              <td>Target</td>
-              <td>Url</td>
-              <td>@</td>
+              <td className="w-1/12">#</td>
+              <td className="w-4/12">Target</td>
+              <td className="w-5/12">Url</td>
+              <td className="w-2/12">@</td>
             </tr>
           </thead>
           <tbody>
             {urls.map((url, i) => {
               let index = urls.length - i;
+              let res_encrypted = false;
+              try {
+                let urlObj = new URL(url.url);
+                // URL.prototype.get return null for non-exists value !
+                res_encrypted = !!urlObj.searchParams.get(
+                  window.__PREFIX__ + "respass"
+                );
+              } catch (e) {}
               let accessurl = url.entryurl;
+              let encryptedUrl = false;
               if (
-                (encrypt && url.encrypted_entryurl != "") ||
+                (url.encrypted_entryurl != "" && (encrypt || res_encrypted)) ||
                 (accessurl == "" && url.encrypted_entryurl != "")
               ) {
                 accessurl = url.encrypted_entryurl;
+                encryptedUrl = true;
               }
               let display =
                 index == urls.length ||
@@ -356,21 +374,23 @@ export default function Home({}) {
                 return null;
               }
               return (
-                <tr key={i}>
+                <tr key={i} className="url">
                   <td>{index}</td>
-                  <td>
+                  <td className="targeturl">
                     <a href={url.url}>
                       {url.url.length > URL_LENGTH_LIMIT
                         ? url.url.substring(0, URL_LENGTH_LIMIT) + "..."
                         : url.url}
                     </a>
                   </td>
-                  <td>
+                  <td className="accessurl">
                     <a href={accessurl}>
                       {accessurl.length > URL_LENGTH_LIMIT
                         ? accessurl.substring(0, URL_LENGTH_LIMIT) + "..."
                         : accessurl}
                     </a>
+                    {encryptedUrl && <span>🔒</span>}
+                    {res_encrypted && <span>🔑</span>}
                   </td>
                   <td>
                     <button
@@ -383,7 +403,7 @@ export default function Home({}) {
                         }
                       }}
                     >
-                      {copiedIndex == index ? "Copied" : "Copy"}
+                      {copiedIndex == index ? "✓Copied" : "Copy"}
                     </button>
                     <button
                       title="Delete"
