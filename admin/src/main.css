@@ -37,6 +37,12 @@ button {
   border: 1px dotted gray;
 }
 
+input.error,
+select.error,
+textarea.error {
+  border: 1px solid red;
+}
+
 input,
 textarea,
 select {

@@ -28,6 +28,7 @@ var (
 	CurlBinary          string
 	Rootpath            string
 	Prefix              string
+	Eid                 string
 	Key                 string
 	Keytype             string
 	PublicUrl           string
@@ -70,6 +71,8 @@ func init() {
 	flag.BoolVar(&Cors, "cors", false, `Set "Access-Control-Allow-Origin: *" header for admin API`)
 	flag.BoolVar(&Sign, "sign", false,
 		`Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)`)
+	flag.StringVar(&Eid, "eid", "",
+		`Used with "-sign -encrypt". Encrypted url id, it will appear at the start of generated encrypted entrypoint utl`)
 	flag.StringVar(&RcloneBinary, "rclone-binary", "rclone", "Rclone binary path")
 	flag.StringVar(&CurlBinary, "curl-binary", "curl", "Curl binary path")
 	flag.StringVar(&RcloneConfig, "rclone-config", "", "Manually specify rclone config file path")

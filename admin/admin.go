@@ -104,8 +104,8 @@ func Generate(params url.Values) (data any, err error) {
 	if !params.Has("url") {
 		return nil, fmt.Errorf("invalid parameters")
 	}
-	canonicalurl, sign, _, entryurl, encryptedEntryurl := proxy.Generate(params.Get("url"), flags.Key,
-		params.Get("publicurl"), flags.Prefix, flags.Cipher)
+	canonicalurl, sign, _, entryurl, encryptedEntryurl := proxy.Generate(params.Get("url"), params.Get("eid"),
+		flags.Key, params.Get("publicurl"), flags.Prefix, flags.Cipher)
 	data = map[string]any{
 		"url":                canonicalurl,
 		"entryurl":           entryurl,
@@ -116,12 +116,13 @@ func Generate(params url.Values) (data any, err error) {
 }
 
 func Decrypt(params url.Values) (any, error) {
-	url, encrypted_entryurl, err := proxy.Decrypt(params.Get("encryptedurl"), params.Get("publicurl"))
+	url, encrypted_entryurl, eid, err := proxy.Decrypt(flags.Prefix, params.Get("encryptedurl"), params.Get("publicurl"))
 	if err != nil {
 		return nil, err
 	}
 	data := map[string]any{
 		"url":                url,
+		"eid":                eid,
 		"encrypted_entryurl": encrypted_entryurl,
 	}
 	return data, nil

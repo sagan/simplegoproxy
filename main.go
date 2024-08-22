@@ -79,8 +79,8 @@ func main() {
 		}
 		if flags.Sign {
 			for _, targetUrl := range args {
-				canonicalurl, sign, encryptedurl, entryurl, encryptedEntryurl := proxy.Generate(targetUrl, flags.Key,
-					flags.PublicUrl, flags.Prefix, flags.Cipher)
+				canonicalurl, sign, encryptedurl, entryurl, encryptedEntryurl := proxy.Generate(targetUrl, flags.Eid,
+					flags.Key, flags.PublicUrl, flags.Prefix, flags.Cipher)
 				var display string
 				if !flags.Encrypt {
 					if entryurl != "" {
@@ -102,7 +102,7 @@ func main() {
 			}
 		} else if flags.Decrypt {
 			for _, targetUrl := range args {
-				url, _, err := proxy.Decrypt(targetUrl, "")
+				url, _, _, err := proxy.Decrypt(flags.Prefix, targetUrl, "")
 				var display string
 				if err != nil {
 					display = fmt.Sprintf("// %v", err)

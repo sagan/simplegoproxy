@@ -61,6 +61,8 @@ Command-line flag arguments:
         Curl binary path (default "curl")
   -decrypt
         Decrypt the encrypted url(s)
+  -eid string
+        Used with "-sign -encrypt". Encrypted url id, it will appear at the start of generated encrypted entrypoint utl
   -enable-all
         Enable all schemes url: unix & file & rclone & curl & exec
   -enable-curl
@@ -167,6 +169,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.
 - `_sgp_keytype=<value>` : The sign key type. See below "Signing key type" section.
 - `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
+- `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
 - `_sgp_respass=<value>` : The password to encrypt response body. See below "Response body encrpytion" section.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
@@ -402,6 +405,8 @@ Instead of putting the plain text target url inside the entrypoint url. If reque
 To get the encrypted form entrypoint url, use the `-encrypt` flag with `-sign` when signing an url using CLI; Or check the "Encrypt" checkbox in Admin UI.
 
 Note the "Modification parameters fronting" does not work with URL encryption -- the whole target url with all query parameters will be encrypted. The encrypted entrypoint url contains only one path segment, e.g.: `http://localhost:8380/abcdefghijklmnopqrstuvwxyz`.
+
+It's possible to prepand a fixed `eid` (encrypted url id) string to the beginning of the generated url to help you identify a encrypted url. To do it, input the "eid" in admin UI or use the `-eid <value>` CLI flag. The encrypted entrypoint url will have format `http://localhost:8380/myeid_abcdefghijklmnopqrstuvwxyz`. Only `[_a-zA-Z0-9]` (regexp) charasters is allowed in `eid`.
 
 The target urls are encrypted using "key" flag value as the cryptographic key. If you change the key, all previously generated entrypoint urls will be inaccessible.
 

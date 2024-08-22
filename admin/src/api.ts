@@ -8,11 +8,13 @@ interface Generate {
 interface Decrypt {
   url: string;
   encrypted_entryurl: string;
+  eid: string;
 }
 
 interface GenerateRequest {
   url: string;
   publicurl: string;
+  eid?: string;
 }
 
 interface DecryptRequest {

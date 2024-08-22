@@ -12,7 +12,7 @@ const MIME_HTML = "text/html; charset=utf-8"
 const INFINITE_TIMEOUT = 86400 * 365 * 100
 
 // match with a encrypted url base62 string
-var EncryptedUrlRegex = regexp.MustCompile(`^[a-zA-Z0-9]{18,}$`)
+var EncryptedUrlRegex = regexp.MustCompile(`^([_a-zA-Z0-9]+?_)?[a-zA-Z0-9]{18,}$`)
 
 // Copied from Chrome file:// url dir index page.
 // Go html/template format.

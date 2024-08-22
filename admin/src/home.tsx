@@ -11,6 +11,7 @@ import {
 
 interface InputForm {
   url: string;
+  eid: string;
   keytype: string;
   body: string;
   resbody: string;
@@ -26,6 +27,8 @@ interface InputForm {
   scope: string;
   method: string;
   respass: string;
+  type: string;
+  restype: string;
   timeout: number;
 }
 
@@ -48,16 +51,19 @@ export default function Home({}) {
   const [copiedIndex, setCopiedIndex] = useState(-1);
   const [filter, setFilter] = useState("");
 
-  const activeBody = !!searchParams.get("body");
-  const activeResbody =
+  const activeReq =
     !!searchParams.get("method") ||
-    !!searchParams.get("resbody") ||
+    !!searchParams.get("type") ||
     !!searchParams.get("fdmethod") ||
-    !!searchParams.get("fdbody") ||
     !!searchParams.get("fdtype") ||
+    !!searchParams.get("fdbody") ||
+    !!searchParams.get("body");
+  const activeRes =
+    !!searchParams.get("resbody") ||
+    !!searchParams.get("restype") ||
     !!searchParams.get("respass");
-  const [showbody, setShowbody] = useState(activeBody);
-  const [showresbody, setShowresbody] = useState(activeResbody);
+  const [showreq, setShowreq] = useState(activeReq);
+  const [showres, setShowres] = useState(activeRes);
   const filter_lowercase = filter.toLowerCase();
   let encrypt = !!searchParams.get("encrypt");
   return (
@@ -71,7 +77,7 @@ export default function Home({}) {
           try {
             let publicurl = window.__ROOTURL__;
             let url = makeUrl(data, window.__PREFIX__);
-            let req: GenerateRequest = { publicurl, url };
+            let req: GenerateRequest = { publicurl, url, eid: data.eid.trim() };
             // setValue("url", "");
             let res = await fetchGenerate(req);
             setUrls([res, ...urls]);
@@ -94,6 +100,17 @@ export default function Home({}) {
             autoFocus
             {...register("url")}
           />
+          <label
+            title={`Encryption url id${errors.eid ? ": invalid input" : ""}`}
+          >
+            <span>Eid:&nbsp;</span>
+            <input
+              className={errors.eid ? "error" : ""}
+              defaultValue=""
+              type="search"
+              {...register("eid", { pattern: /^[_a-zA-Z0-9]*$/ })}
+            />
+          </label>
           <label title="Encrypt generated entrypoint url">
             <input
               checked={encrypt}
@@ -219,40 +236,24 @@ export default function Home({}) {
               {...register("addon")}
             />
           </label>
-          <label
-            title="Set request body"
-            className={activeBody ? "active" : ""}
-          >
+          <label title="Set request" className={activeReq ? "active" : ""}>
             <input
-              checked={showbody}
+              checked={showreq}
               type="checkbox"
-              onChange={() => setShowbody(!showbody)}
+              onChange={() => setShowreq(!showreq)}
             />
-            &nbsp;Body
+            &nbsp;Req
           </label>
-          <label
-            title="Set response body"
-            className={activeResbody ? "active" : ""}
-          >
+          <label title="Set response" className={activeRes ? "active" : ""}>
             <input
-              checked={showresbody}
+              checked={showres}
               type="checkbox"
-              onChange={() => setShowresbody(!showresbody)}
+              onChange={() => setShowres(!showres)}
             />
-            &nbsp;ResBody
+            &nbsp;Res
           </label>
         </p>
-        {showbody && (
-          <p className="flex">
-            <textarea
-              className="flex-1"
-              placeholder="body"
-              defaultValue={searchParams.get("body") || ""}
-              {...register("body")}
-            />
-          </p>
-        )}
-        {showresbody && (
+        {showreq && (
           <>
             <p className="flex">
               <label title="Http request method">
@@ -268,6 +269,24 @@ export default function Home({}) {
                   <option value="DELETE">DELETE</option>
                 </select>
               </label>
+              <label title="Http request content type">
+                Type&nbsp;
+                <select
+                  defaultValue={searchParams.get("type")}
+                  {...register("type")}
+                >
+                  <option value="">(Default)</option>
+                  <option value="application/x-www-form-urlencoded">
+                    application/x-www-form-urlencoded
+                  </option>
+                  <option value="multipart/form-data">
+                    multipart/form-data
+                  </option>
+                  <option value="txt">txt</option>
+                  <option value="json">json</option>
+                  <option value="xml">xml</option>
+                </select>
+              </label>
               <label title="Forward http request method">
                 <input
                   defaultChecked={!!searchParams.get("fdmethod")}
@@ -275,6 +294,14 @@ export default function Home({}) {
                   {...register("fdmethod")}
                 />
                 &nbsp;Forward Method
+              </label>
+              <label title="Forward http request Content-Type">
+                <input
+                  defaultChecked={!!searchParams.get("fdtype")}
+                  type="checkbox"
+                  {...register("fdtype")}
+                />
+                &nbsp;Forward Content-Type
               </label>
               <label title="Forward http request body">
                 <input
@@ -284,13 +311,33 @@ export default function Home({}) {
                 />
                 &nbsp;Forward Body
               </label>
-              <label title="Forward http request Content-Type">
-                <input
-                  defaultChecked={!!searchParams.get("fdtype")}
-                  type="checkbox"
-                  {...register("fdtype")}
-                />
-                &nbsp;Forward Content-Type
+            </p>
+            <p className="flex">
+              <textarea
+                className="flex-1"
+                placeholder="body"
+                defaultValue={searchParams.get("body") || ""}
+                {...register("body")}
+              />
+            </p>
+          </>
+        )}
+        {showres && (
+          <>
+            <p className="flex">
+              <label title="Http response content type">
+                Restype&nbsp;
+                <select
+                  defaultValue={searchParams.get("restype")}
+                  {...register("restype")}
+                >
+                  <option value="">(Default)</option>
+                  <option value="txt">txt</option>
+                  <option value="html">html</option>
+                  <option value="xml">xml</option>
+                  <option value="json">json</option>
+                  <option value="yaml">yaml</option>
+                </select>
               </label>
               <label title="Password to encrypt response body">
                 <span>Respass:&nbsp;🔑</span>
@@ -446,6 +493,9 @@ export default function Home({}) {
                             fdtype: false,
                             method: "",
                             respass: "",
+                            eid: "",
+                            restype: "",
+                            type: "",
                           };
                           let params: string[][] = [];
                           for (const [key, value] of urlObj.searchParams) {
@@ -515,7 +565,10 @@ export default function Home({}) {
                                 }
                               }
                               values.addon +=
-                                key + "=" + encodeURIComponent(value);
+                                window.__PREFIX__ +
+                                key +
+                                "=" +
+                                encodeURIComponent(value);
                             }
                           }
                           let option = {
@@ -537,8 +590,11 @@ export default function Home({}) {
                           setValue("addon", values.addon, option);
                           setValue("timeout", values.timeout, option);
                           setValue("body", values.body, option);
+                          setValue("type", values.type, option);
                           setValue("resbody", values.resbody, option);
+                          setValue("restype", values.restype, option);
                           setValue("url", urlObj.href, option);
+                          setValue("eid", values.eid, option);
                         } catch (e) {
                           alert(`${e}`);
                         }
@@ -627,7 +683,7 @@ function serializeInputForm(
     [key: string]: any;
   } = {};
   for (let key in data) {
-    if (key == "url") {
+    if (key == "url" || key == "eid") {
       continue;
     }
     if (typeof data[key] == "boolean") {
@@ -641,6 +697,5 @@ function serializeInputForm(
   if (encrypt) {
     values["encrypt"] = 1;
   }
-  console.log("serialize", values);
   return new URLSearchParams(values);
 }

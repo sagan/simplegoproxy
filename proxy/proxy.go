@@ -63,6 +63,7 @@ const (
 	VALIDBEFORE_STRING     = "validbefore"
 	VALIDAFTER_STRING      = "validafter"
 	RESPASS_STRING         = "respass"
+	EID_STRING             = "eid" // encrypt url id
 	DEBUG_STRING           = "debug"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
@@ -102,6 +103,11 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	targetUrl := r.URL.EscapedPath()
 	encryptUrlMode := false
 	if constants.EncryptedUrlRegex.MatchString(targetUrl) {
+		var eid string
+		if i := strings.LastIndex(targetUrl, "_"); i != -1 {
+			eid = targetUrl[:i]
+			targetUrl = targetUrl[i+1:]
+		}
 		decrypted, err := util.Decrypt(cipher, targetUrl)
 		if err != nil {
 			sendError(w, r, supressError, doLog, "Invalid encrypted url: %v", err)
@@ -114,6 +120,10 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 			return
 		}
 		reqUrlQuery = targetUrlObj.Query()
+		if qeid := reqUrlQuery.Get(prefix + EID_STRING); qeid != "" && qeid != eid {
+			sendError(w, r, supressError, doLog, "Invalid eid")
+			return
+		}
 		targetUrlObj.RawQuery = ""
 		targetUrl = targetUrlObj.String()
 		encryptUrlMode = true
@@ -274,7 +284,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			value = applyEnv(value)
 		}
 		switch key {
-		case ARG_SRING, ARGS_SRING:
+		case EID_STRING, ARG_SRING, ARGS_SRING:
 			// do nothing
 		case DEBUG_STRING:
 			debug = true
@@ -709,7 +719,7 @@ func Realkey(key, keytype string) string {
 	return key
 }
 
-func Generate(targetUrl, key, publicurl, prefix string,
+func Generate(targetUrl, eid, key, publicurl, prefix string,
 	cipher cipher.AEAD) (canonicalurl string, sign, encryptedurl, entryurl, encryptedEntryurl string) {
 	urlObj, err := url.Parse(targetUrl)
 	signstr := ""
@@ -793,6 +803,9 @@ func Generate(targetUrl, key, publicurl, prefix string,
 				}
 				canonicalurlObj.RawQuery = query.Encode()
 				encryptedurl = util.EncryptToString(cipher, []byte(canonicalurlObj.String()))
+				if eid != "" {
+					encryptedurl = eid + "_" + encryptedurl
+				}
 				encryptedEntryurl = strings.TrimSuffix(publicurl, "/") + "/" + encryptedurl
 			}
 		}
@@ -802,7 +815,7 @@ func Generate(targetUrl, key, publicurl, prefix string,
 	return
 }
 
-func Decrypt(encryptedurl, publicurl string) (url, encryptedEntryurl string, err error) {
+func Decrypt(prefix, encryptedurl, publicurl string) (plainurl, encryptedEntryurl, eid string, err error) {
 	i := strings.LastIndex(encryptedurl, "?")
 	if i != -1 {
 		encryptedurl = encryptedurl[:i]
@@ -812,17 +825,30 @@ func Decrypt(encryptedurl, publicurl string) (url, encryptedEntryurl string, err
 		encryptedurl = encryptedurl[i+1:]
 	}
 	if !constants.EncryptedUrlRegex.MatchString(encryptedurl) {
-		return "", "", fmt.Errorf("invalid parameters")
+		return "", "", "", fmt.Errorf("invalid parameters")
 	}
 	if flags.Cipher == nil {
-		return "", "", fmt.Errorf("key is empty")
+		return "", "", "", fmt.Errorf("key is empty")
 	}
-	plaindata, err := util.Decrypt(flags.Cipher, encryptedurl)
+	var ciphertext string
+	if i := strings.LastIndex(encryptedurl, "_"); i != -1 {
+		eid = encryptedurl[:i]
+		ciphertext = encryptedurl[i+1:]
+	} else {
+		ciphertext = encryptedurl
+	}
+	plaindata, err := util.Decrypt(flags.Cipher, ciphertext)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
+	}
+	plainurl = string(plaindata)
+	if eid != "" {
+		if urlObj, err := url.Parse(plainurl); err != nil || urlObj.Query().Get(prefix+EID_STRING) != eid {
+			return "", "", "", fmt.Errorf("invalid eid")
+		}
 	}
 	if publicurl != "" {
 		encryptedEntryurl = strings.TrimSuffix(publicurl, "/") + "/" + encryptedurl
 	}
-	return string(plaindata), encryptedEntryurl, nil
+	return plainurl, encryptedEntryurl, eid, nil
 }
