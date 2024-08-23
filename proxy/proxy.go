@@ -48,6 +48,7 @@ const (
 	INSECURE_STRING        = "insecure"
 	COOKIE_STRING          = "cookie"
 	USER_STRING            = "user"
+	RESUSER_STRING         = "resuser" // response http authorization username:password
 	FDHEADERS_STRING       = "fdheaders"
 	BODY_STRING            = "body"
 	RESBODY_STRING         = "resbody"
@@ -62,8 +63,8 @@ const (
 	KEYTYPE_STRING         = "keytype"
 	VALIDBEFORE_STRING     = "validbefore"
 	VALIDAFTER_STRING      = "validafter"
-	RESPASS_STRING         = "respass"
-	EID_STRING             = "eid" // encrypt url id
+	RESPASS_STRING         = "respass" // response body encryption password
+	EID_STRING             = "eid"     // encrypt url id
 	DEBUG_STRING           = "debug"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
@@ -183,6 +184,10 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 			return
 		}
 	} else {
+		if !encryptUrlMode && (queryParams.Has(RESPASS_STRING) || queryParams.Has(RESUSER_STRING)) {
+			sendError(w, r, supressError, doLog, "url with resuser or respass must be accessed via encrypted url")
+			return
+		}
 		switch targetUrlObj.Scheme {
 		case "unix":
 			if !enableUnix {
@@ -204,11 +209,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 				sendError(w, r, supressError, doLog, "exec url is not enabled")
 				return
 			}
-		case "http", "https", "data":
-			if queryParams.Has(RESPASS_STRING) && !encryptUrlMode {
-				sendError(w, r, supressError, doLog, "url with respass must be accessed via encrypted url")
-				return
-			}
+		case "http", "https", "data": // do nothing
 		default:
 			sendError(w, r, supressError, doLog, "unsupported url scheme %q", targetUrlObj.Scheme)
 			return
@@ -234,7 +235,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	}
 }
 
-func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, prefix, signkey string,
+func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, prefix, signkey string,
 	keytypeBlacklist, openScopes []string, rcloneBinary, rcloneConfig string, doLog bool) (*http.Response, error) {
 	isSigned := queryParams.Get(SIGN_STRING) != ""
 	if isSigned && signkey == "" {
@@ -261,6 +262,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	timeout := int64(0)
 	cookie := ""
 	user := ""
+	resuser := ""
 	fdheaders := ""
 	body := ""
 	forwardBody := false
@@ -313,6 +315,8 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			cookie = value
 		case USER_STRING:
 			user = value
+		case RESUSER_STRING:
+			resuser = value
 		case METHOD_STRING:
 			method = strings.ToUpper(value)
 		case FDHEADERS_STRING:
@@ -386,11 +390,11 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			}
 		}
 	}
-	if len(referers) > 0 && !util.MatchUrlPatterns(referers, srReq.Header.Get("Referer"), true) {
-		return nil, fmt.Errorf("invalid referer '%s', allowed referers: %v", srReq.Header.Get("Referer"), referers)
+	if len(referers) > 0 && !util.MatchUrlPatterns(referers, srcReq.Header.Get("Referer"), true) {
+		return nil, fmt.Errorf("invalid referer '%s', allowed referers: %v", srcReq.Header.Get("Referer"), referers)
 	}
-	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srReq.Header.Get("Origin"), true) {
-		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srReq.Header.Get("Origin"), origines)
+	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
+		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
 	}
 	if templateContents != "" {
 		if responseContentType == "" || responseContentType == "html" {
@@ -464,7 +468,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			"If-Unmodified-Since", "Range"}
 		if fdheaders != "" {
 			if fdheaders == "*" {
-				for h := range srReq.Header {
+				for h := range srcReq.Header {
 					forwardHeaders = append(forwardHeaders, h)
 				}
 			} else if fdheaders == "\n" {
@@ -478,17 +482,17 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 			if strings.HasPrefix(h, ":") {
 				switch h {
 				case ":method":
-					method = srReq.Method
+					method = srcReq.Method
 				case ":body":
 					forwardBody = true
 				default:
 					return nil, fmt.Errorf("invalid fdheader %q", h)
 				}
 			} else {
-				if len(header.Values(h)) > 0 || len(srReq.Header.Values(h)) == 0 {
+				if len(header.Values(h)) > 0 || len(srcReq.Header.Values(h)) == 0 {
 					continue
 				}
-				header[h] = srReq.Header[h]
+				header[h] = srcReq.Header[h]
 			}
 		}
 		if header.Get("Content-Type") == "" && method == http.MethodPost && body != "" {
@@ -505,6 +509,22 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 				urlQuery[key] = values
 			}
 			urlObj.RawQuery = urlQuery.Encode()
+		}
+	}
+
+	if resuser != "" {
+		username, password, _ := strings.Cut(resuser, ":")
+		if username == "" && password == "" {
+			return nil, fmt.Errorf("invalid resuser, username and password can not be both empty")
+		}
+		user, pass, ok := srcReq.BasicAuth()
+		if !ok || username != user || password != pass {
+			return &http.Response{
+				StatusCode: http.StatusUnauthorized,
+				Header: http.Header{
+					"WWW-Authenticate": []string{`Basic realm="website"`},
+				},
+			}, nil
 		}
 	}
 
@@ -529,12 +549,12 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 	} else {
 		urlStr := urlObj.String()
 		var reqBody io.Reader
-		if forwardBody && srReq.Body != nil {
-			reqBody = srReq.Body
+		if forwardBody && srcReq.Body != nil {
+			reqBody = srcReq.Body
 		} else if body != "" {
 			reqBody = strings.NewReader(body)
 		}
-		req, err = http.NewRequestWithContext(srReq.Context(), method, urlStr, reqBody)
+		req, err = http.NewRequestWithContext(srcReq.Context(), method, urlStr, reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("invalid http request: %v", err)
 		}
@@ -569,7 +589,7 @@ func FetchUrl(urlObj *url.URL, srReq *http.Request, queryParams url.Values, pref
 		res.Header.Set("Access-Control-Allow-Origin", "*")
 		res.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
 		// res.Header.Set("Access-Control-Allow-Credentials", "true") // it's security vulerable as sgp has admin API now.
-		if h := srReq.Header.Get("Access-Control-Request-Headers"); h != "" {
+		if h := srcReq.Header.Get("Access-Control-Request-Headers"); h != "" {
 			res.Header.Set("Access-Control-Allow-Headers", h)
 		}
 		res.Header.Set("Vary", "Access-Control-Request-Headers")

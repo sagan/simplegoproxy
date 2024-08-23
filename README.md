@@ -34,6 +34,7 @@ TOC
   - [Scope signing](#scope-signing)
   - [Open scopes](#open-scopes)
   - [URL encryption](#url-encryption)
+  - [Response authorization](#response-authorization)
   - [Response body encrpytion](#response-body-encrpytion)
   - [Referer restrictions](#referer-restrictions)
   - [Origin restrictions](#origin-restrictions)
@@ -170,6 +171,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_keytype=<value>` : The sign key type. See below "Signing key type" section.
 - `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
 - `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
+- `_sgp_resuser=user:pass` : The username & password for http response. See below "Response authorization" section.
 - `_sgp_respass=<value>` : The password to encrypt response body. See below "Response body encrpytion" section.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
@@ -409,6 +411,10 @@ Note the "Modification parameters fronting" does not work with URL encryption --
 It's possible to prepand a fixed `eid` (encrypted url id) string to the beginning of the generated url to help you identify a encrypted url. To do it, input the "eid" in admin UI or use the `-eid <value>` CLI flag. The encrypted entrypoint url will have format `http://localhost:8380/myeid_abcdefghijklmnopqrstuvwxyz`. Only `[_a-zA-Z0-9]` (regexp) charasters is allowed in `eid`.
 
 The target urls are encrypted using "key" flag value as the cryptographic key. If you change the key, all previously generated entrypoint urls will be inaccessible.
+
+### Response authorization
+
+If "URL encryption" is used and the `_sgp_respass=uass:pass` parameter is set. The returned http response of Simplegoproxy will require http basic authorization using specified username & password.
 
 ### Response body encrpytion
 

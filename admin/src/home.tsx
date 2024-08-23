@@ -26,6 +26,7 @@ interface InputForm {
   addon: string;
   scope: string;
   method: string;
+  resuser: string;
   respass: string;
   type: string;
   restype: string;
@@ -59,9 +60,10 @@ export default function Home({}) {
     !!searchParams.get("fdbody") ||
     !!searchParams.get("body");
   const activeRes =
+    !!searchParams.get("resuser") ||
+    !!searchParams.get("respass") ||
     !!searchParams.get("resbody") ||
-    !!searchParams.get("restype") ||
-    !!searchParams.get("respass");
+    !!searchParams.get("restype");
   const [showreq, setShowreq] = useState(activeReq);
   const [showres, setShowres] = useState(activeRes);
   const filter_lowercase = filter.toLowerCase();
@@ -339,6 +341,14 @@ export default function Home({}) {
                   <option value="yaml">yaml</option>
                 </select>
               </label>
+              <label title="Http response basic auth user">
+                <span>Resuser:&nbsp;🪪</span>
+                <input
+                  placeholder="user:pass"
+                  defaultValue={searchParams.get("resuser") || ""}
+                  {...register("resuser")}
+                />
+              </label>
               <label title="Password to encrypt response body">
                 <span>Respass:&nbsp;🔑</span>
                 <input
@@ -397,6 +407,7 @@ export default function Home({}) {
           <tbody>
             {urls.map((url, i) => {
               let index = urls.length - i;
+              let res_needauth = false;
               let res_encrypted = false;
               try {
                 let urlObj = new URL(url.url);
@@ -404,11 +415,15 @@ export default function Home({}) {
                 res_encrypted = !!urlObj.searchParams.get(
                   window.__PREFIX__ + "respass"
                 );
+                res_needauth = !!urlObj.searchParams.get(
+                  window.__PREFIX__ + "resuser"
+                );
               } catch (e) {}
               let accessurl = url.entryurl;
               let encryptedUrl = false;
               if (
-                (url.encrypted_entryurl != "" && (encrypt || res_encrypted)) ||
+                (url.encrypted_entryurl != "" &&
+                  (encrypt || res_needauth || res_encrypted)) ||
                 (accessurl == "" && url.encrypted_entryurl != "")
               ) {
                 accessurl = url.encrypted_entryurl;
@@ -436,8 +451,15 @@ export default function Home({}) {
                         ? accessurl.substring(0, URL_LENGTH_LIMIT) + "..."
                         : accessurl}
                     </a>
-                    {encryptedUrl && <span>🔒</span>}
-                    {res_encrypted && <span>🔑</span>}
+                    {encryptedUrl && <span title="URL is encrypted">🔒</span>}
+                    {res_needauth && (
+                      <span title="Http response needs basic authorization">
+                        🪪
+                      </span>
+                    )}
+                    {res_encrypted && (
+                      <span title="Http response is encrypted">🔑</span>
+                    )}
                   </td>
                   <td>
                     <button
@@ -492,6 +514,7 @@ export default function Home({}) {
                             fdbody: false,
                             fdtype: false,
                             method: "",
+                            resuser: "",
                             respass: "",
                             eid: "",
                             restype: "",
@@ -581,6 +604,7 @@ export default function Home({}) {
                           setValue("fdbody", values.fdbody, option);
                           setValue("fdtype", values.fdtype, option);
                           setValue("method", values.method, option);
+                          setValue("resuser", values.resuser, option);
                           setValue("respass", values.respass, option);
                           setValue("cors", values.cors, option);
                           setValue("nocsp", values.nocsp, option);
