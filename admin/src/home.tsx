@@ -26,6 +26,7 @@ interface InputForm {
   addon: string;
   scope: string;
   method: string;
+  user: string;
   resuser: string;
   respass: string;
   type: string;
@@ -57,6 +58,7 @@ export default function Home({}) {
     !!searchParams.get("type") ||
     !!searchParams.get("fdmethod") ||
     !!searchParams.get("fdtype") ||
+    !!searchParams.get("user") ||
     !!searchParams.get("fdbody") ||
     !!searchParams.get("body");
   const activeRes =
@@ -313,6 +315,14 @@ export default function Home({}) {
                 />
                 &nbsp;Forward Body
               </label>
+              <label title="Target url http request basic auth user">
+                <span>User:&nbsp;</span>
+                <input
+                  placeholder="user:pass"
+                  defaultValue={searchParams.get("user") || ""}
+                  {...register("user")}
+                />
+              </label>
             </p>
             <p className="flex">
               <textarea
@@ -519,6 +529,7 @@ export default function Home({}) {
                             eid: "",
                             restype: "",
                             type: "",
+                            user: "",
                           };
                           let params: string[][] = [];
                           for (const [key, value] of urlObj.searchParams) {
@@ -604,6 +615,7 @@ export default function Home({}) {
                           setValue("fdbody", values.fdbody, option);
                           setValue("fdtype", values.fdtype, option);
                           setValue("method", values.method, option);
+                          setValue("user", values.user, option);
                           setValue("resuser", values.resuser, option);
                           setValue("respass", values.respass, option);
                           setValue("cors", values.cors, option);
