@@ -2,12 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "@rehooks/local-storage";
-import {
-  Generate,
-  GenerateRequest,
-  fetchDecrypt,
-  fetchGenerate,
-} from "./api.js";
+import { Generate, GenerateRequest, fetchParse, fetchGenerate } from "./api.js";
 
 interface InputForm {
   url: string;
@@ -31,6 +26,8 @@ interface InputForm {
   respass: string;
   type: string;
   restype: string;
+  impersonate: string;
+  status: number;
   timeout: number;
 }
 
@@ -60,8 +57,10 @@ export default function Home({}) {
     !!searchParams.get("fdtype") ||
     !!searchParams.get("user") ||
     !!searchParams.get("fdbody") ||
+    !!searchParams.get("impersonate") ||
     !!searchParams.get("body");
   const activeRes =
+    !!searchParams.get("status") ||
     !!searchParams.get("resuser") ||
     !!searchParams.get("respass") ||
     !!searchParams.get("resbody") ||
@@ -91,12 +90,19 @@ export default function Home({}) {
         })}
       >
         <p className="flex flex-wrap">
-          <a
-            title={"Simplegoproxy " + window.__VERSION__}
-            href="https://github.com/sagan/simplegoproxy"
-          >
-            SGP
-          </a>
+          <span>
+            <a
+              title={"Simplegoproxy " + window.__VERSION__}
+              href={window.__ADMINPATH__}
+              onClick={(e) => {
+                e.preventDefault();
+                resetParams();
+              }}
+            >
+              SGP
+            </a>
+            <a href="https://github.com/sagan/simplegoproxy">ℹ️</a>
+          </span>
           <input
             type="search"
             className="flex-1"
@@ -143,20 +149,20 @@ export default function Home({}) {
           </button>
           <button
             type="button"
-            title="Decrypt a encrypted url"
+            title="Import a url"
             onClick={async () => {
               let publicurl = window.__ROOTURL__;
-              let encryptedurl = prompt("Input the encrypted url:", "");
-              if (!encryptedurl) {
+              let url = prompt("Input the url:", "");
+              if (!url) {
                 return;
               }
               try {
-                let res = await fetchDecrypt({ encryptedurl, publicurl });
+                let res = await fetchParse({ url, publicurl });
                 setUrls([
                   {
                     url: res.url,
                     encrypted_entryurl: res.encrypted_entryurl,
-                    entryurl: "",
+                    entryurl: res.entryurl,
                     sign: "",
                   },
                   ...urls,
@@ -166,7 +172,7 @@ export default function Home({}) {
               }
             }}
           >
-            Decrypt
+            Import
           </button>
         </p>
         <p className="flex flex-wrap">
@@ -192,7 +198,7 @@ export default function Home({}) {
               type="checkbox"
               {...register("fdua")}
             />
-            &nbsp;Forward UA
+            &nbsp;Fd UA
           </label>
           <label title="Forward 'Authorization' request header">
             <input
@@ -200,7 +206,7 @@ export default function Home({}) {
               type="checkbox"
               {...register("fdauth")}
             />
-            &nbsp;Forward Auth
+            &nbsp;Fd Auth
           </label>
           <label title="Debug mode">
             <input
@@ -297,7 +303,7 @@ export default function Home({}) {
                   type="checkbox"
                   {...register("fdmethod")}
                 />
-                &nbsp;Forward Method
+                &nbsp;Fd Method
               </label>
               <label title="Forward http request Content-Type">
                 <input
@@ -305,7 +311,7 @@ export default function Home({}) {
                   type="checkbox"
                   {...register("fdtype")}
                 />
-                &nbsp;Forward Content-Type
+                &nbsp;Fd Type
               </label>
               <label title="Forward http request body">
                 <input
@@ -313,7 +319,7 @@ export default function Home({}) {
                   type="checkbox"
                   {...register("fdbody")}
                 />
-                &nbsp;Forward Body
+                &nbsp;Fd Body
               </label>
               <label title="Target url http request basic auth user">
                 <span>User:&nbsp;</span>
@@ -322,6 +328,17 @@ export default function Home({}) {
                   defaultValue={searchParams.get("user") || ""}
                   {...register("user")}
                 />
+              </label>
+              <label title="Http request impersonate browser">
+                Impersonate:&nbsp;
+                <select
+                  defaultValue={searchParams.get("impersonate")}
+                  {...register("impersonate")}
+                >
+                  <option value="">(default)</option>
+                  <option value="chrome120">chrome120</option>
+                  <option value="firefox121">firefox121</option>
+                </select>
               </label>
             </p>
             <p className="flex">
@@ -337,6 +354,22 @@ export default function Home({}) {
         {showres && (
           <>
             <p className="flex">
+              <label title="Http response status">
+                Status&nbsp;
+                <select
+                  defaultValue={parseInt(searchParams.get("status")) || 0}
+                  {...register("status", { valueAsNumber: true })}
+                >
+                  <option value="0">(Default)</option>
+                  <option value="-1">Use Original</option>
+                  <option value="200">200</option>
+                  <option value="401">401</option>
+                  <option value="403">403</option>
+                  <option value="404">404</option>
+                  <option value="500">500</option>
+                  <option value="503">503</option>
+                </select>
+              </label>
               <label title="Http response content type">
                 Restype&nbsp;
                 <select
@@ -461,14 +494,23 @@ export default function Home({}) {
                         ? accessurl.substring(0, URL_LENGTH_LIMIT) + "..."
                         : accessurl}
                     </a>
-                    {encryptedUrl && <span title="URL is encrypted">🔒</span>}
+                    {encryptedUrl && (
+                      <span className="icon" title="URL is encrypted">
+                        🔒
+                      </span>
+                    )}
                     {res_needauth && (
-                      <span title="Http response needs basic authorization">
+                      <span
+                        className="icon"
+                        title="Http response needs basic authorization"
+                      >
                         🪪
                       </span>
                     )}
                     {res_encrypted && (
-                      <span title="Http response is encrypted">🔑</span>
+                      <span className="icon" title="Http response is encrypted">
+                        🔑
+                      </span>
                     )}
                   </td>
                   <td>
@@ -505,135 +547,24 @@ export default function Home({}) {
                     <button
                       title="Use this url again"
                       onClick={() => {
-                        try {
-                          let urlObj = new URL(url.url);
-                          let values: InputForm = {
-                            url: "",
-                            keytype: "",
-                            body: "",
-                            resbody: "",
-                            cors: false,
-                            nocsp: false,
-                            fdua: false,
-                            fdauth: false,
-                            debug: false,
-                            addon: "",
-                            scope: "",
-                            timeout: 0,
-                            fdmethod: false,
-                            fdbody: false,
-                            fdtype: false,
-                            method: "",
-                            resuser: "",
-                            respass: "",
-                            eid: "",
-                            restype: "",
-                            type: "",
-                            user: "",
-                          };
-                          let params: string[][] = [];
-                          for (const [key, value] of urlObj.searchParams) {
-                            params.push([key, value]);
-                          }
-                          for (let [key, value] of params) {
-                            if (
-                              !key.startsWith(window.__PREFIX__) ||
-                              key.length == window.__PREFIX__.length
-                            ) {
-                              continue;
-                            }
-                            urlObj.searchParams.delete(key, value);
-                            key = key.substring(window.__PREFIX__.length);
-                            if (values[key] !== undefined) {
-                              switch (typeof values[key]) {
-                                case "boolean":
-                                  if (value) {
-                                    values[key] = true;
-                                  }
-                                  break;
-                                case "number":
-                                  if (value) {
-                                    values[key] = parseInt(value) || 0;
-                                  }
-                                  break;
-                                case "string":
-                                  if (value) {
-                                    values[key] = value;
-                                  }
-                              }
-                            } else if (key != "sign") {
-                              if (values.addon != "") {
-                                values.addon += "&";
-                              }
-                              if (key == "fdheaders") {
-                                let fdheaders = value.split(/\s*,\s*/);
-                                let i = -1;
-                                i = fdheaders.indexOf("Authorization");
-                                if (i != -1) {
-                                  values.fdauth = true;
-                                  fdheaders.splice(i, 1);
-                                }
-                                i = fdheaders.indexOf("Content-Type");
-                                if (i != -1) {
-                                  values.fdtype = true;
-                                  fdheaders.splice(i, 1);
-                                }
-                                i = fdheaders.indexOf("User-Agent");
-                                if (i != -1) {
-                                  values.fdua = true;
-                                  fdheaders.splice(i, 1);
-                                }
-                                i = fdheaders.indexOf(":method");
-                                if (i != -1) {
-                                  values.fdmethod = true;
-                                  fdheaders.splice(i, 1);
-                                }
-                                i = fdheaders.indexOf(":body");
-                                if (i != -1) {
-                                  values.fdbody = true;
-                                  fdheaders.splice(i, 1);
-                                }
-                                value = fdheaders.join(",");
-                                if (value == "") {
-                                  continue;
-                                }
-                              }
-                              values.addon +=
-                                window.__PREFIX__ +
-                                key +
-                                "=" +
-                                encodeURIComponent(value);
-                            }
-                          }
-                          let option = {
-                            shouldDirty: true,
-                            shouldTouch: true,
-                          };
-                          setValue("fdua", values.fdua, option);
-                          setValue("fdauth", values.fdauth, option);
-                          setValue("fdmethod", values.fdmethod, option);
-                          setValue("fdbody", values.fdbody, option);
-                          setValue("fdtype", values.fdtype, option);
-                          setValue("method", values.method, option);
-                          setValue("user", values.user, option);
-                          setValue("resuser", values.resuser, option);
-                          setValue("respass", values.respass, option);
-                          setValue("cors", values.cors, option);
-                          setValue("nocsp", values.nocsp, option);
-                          setValue("debug", values.debug, option);
-                          setValue("keytype", values.keytype, option);
-                          setValue("scope", values.scope, option);
-                          setValue("addon", values.addon, option);
-                          setValue("timeout", values.timeout, option);
-                          setValue("body", values.body, option);
-                          setValue("type", values.type, option);
-                          setValue("resbody", values.resbody, option);
-                          setValue("restype", values.restype, option);
-                          setValue("url", urlObj.href, option);
-                          setValue("eid", values.eid, option);
-                        } catch (e) {
-                          alert(`${e}`);
+                        let urlObj = new URL(url.url);
+                        let params: string[][] = [];
+                        for (const [key, value] of urlObj.searchParams) {
+                          params.push([key, value]);
                         }
+                        let searchParams = new URLSearchParams();
+                        for (let [key, value] of params) {
+                          if (
+                            key.startsWith(window.__PREFIX__) &&
+                            key.length > window.__PREFIX__.length
+                          ) {
+                            searchParams.append(key, value);
+                            urlObj.searchParams.delete(key, value);
+                            continue;
+                          }
+                        }
+                        setValue("url", urlObj.href);
+                        resetParams(searchParams);
                       }}
                     >
                       Use
@@ -647,6 +578,108 @@ export default function Home({}) {
       </div>
     </>
   );
+
+  function resetParams(searchParams: URLSearchParams = new URLSearchParams()) {
+    let values = NewInputForm();
+    let params: string[][] = [];
+    for (const [key, value] of searchParams) {
+      params.push([key, value]);
+    }
+    for (let [key, value] of params) {
+      if (
+        !key.startsWith(window.__PREFIX__) ||
+        key.length == window.__PREFIX__.length
+      ) {
+        continue;
+      }
+      key = key.substring(window.__PREFIX__.length);
+      if (values[key] !== undefined) {
+        switch (typeof values[key]) {
+          case "boolean":
+            if (value) {
+              values[key] = true;
+            }
+            break;
+          case "number":
+            if (value) {
+              values[key] = parseInt(value) || 0;
+            }
+            break;
+          case "string":
+            if (value) {
+              values[key] = value;
+            }
+        }
+      } else if (key != "sign") {
+        if (values.addon != "") {
+          values.addon += "&";
+        }
+        if (key == "fdheaders") {
+          let fdheaders = value.split(/\s*,\s*/);
+          let i = -1;
+          i = fdheaders.indexOf("Authorization");
+          if (i != -1) {
+            values.fdauth = true;
+            fdheaders.splice(i, 1);
+          }
+          i = fdheaders.indexOf("Content-Type");
+          if (i != -1) {
+            values.fdtype = true;
+            fdheaders.splice(i, 1);
+          }
+          i = fdheaders.indexOf("User-Agent");
+          if (i != -1) {
+            values.fdua = true;
+            fdheaders.splice(i, 1);
+          }
+          i = fdheaders.indexOf(":method");
+          if (i != -1) {
+            values.fdmethod = true;
+            fdheaders.splice(i, 1);
+          }
+          i = fdheaders.indexOf(":body");
+          if (i != -1) {
+            values.fdbody = true;
+            fdheaders.splice(i, 1);
+          }
+          value = fdheaders.join(",");
+          if (value == "") {
+            continue;
+          }
+        }
+        values.addon +=
+          window.__PREFIX__ + key + "=" + encodeURIComponent(value);
+      }
+    }
+    let option = {
+      shouldDirty: true,
+      shouldTouch: true,
+    };
+    setValue("fdua", values.fdua, option);
+    setValue("fdauth", values.fdauth, option);
+    setValue("fdmethod", values.fdmethod, option);
+    setValue("fdbody", values.fdbody, option);
+    setValue("fdtype", values.fdtype, option);
+    setValue("method", values.method, option);
+    setValue("user", values.user, option);
+    setValue("resuser", values.resuser, option);
+    setValue("respass", values.respass, option);
+    setValue("cors", values.cors, option);
+    setValue("nocsp", values.nocsp, option);
+    setValue("debug", values.debug, option);
+    setValue("keytype", values.keytype, option);
+    setValue("scope", values.scope, option);
+    setValue("addon", values.addon, option);
+    setValue("timeout", values.timeout, option);
+    setValue("body", values.body, option);
+    setValue("type", values.type, option);
+    setValue("resbody", values.resbody, option);
+    setValue("restype", values.restype, option);
+    setValue("status", values.status, option);
+    setValue("eid", values.eid, option);
+    setValue("impersonate", values.impersonate, option);
+    setSearchParams(serializeInputForm(getValues(), encrypt));
+  }
 }
 
 function makeUrl(data: InputForm, prefix: string): string {
@@ -734,4 +767,33 @@ function serializeInputForm(
     values["encrypt"] = 1;
   }
   return new URLSearchParams(values);
+}
+
+function NewInputForm(): InputForm {
+  return {
+    url: "",
+    keytype: "",
+    body: "",
+    resbody: "",
+    cors: false,
+    nocsp: false,
+    fdua: false,
+    fdauth: false,
+    debug: false,
+    addon: "",
+    scope: "",
+    timeout: 0,
+    status: 0,
+    fdmethod: false,
+    fdbody: false,
+    fdtype: false,
+    method: "",
+    resuser: "",
+    respass: "",
+    eid: "",
+    restype: "",
+    type: "",
+    user: "",
+    impersonate: "",
+  };
 }

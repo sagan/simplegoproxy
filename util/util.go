@@ -105,7 +105,7 @@ var ImpersonateProfiles = map[string]*ImpersonateProfile{
 			{"Sec-Fetch-Mode", `navigate`},
 			{"Sec-Fetch-User", `?1`},
 			{"Sec-Fetch-Dest", `document`},
-			// {"Accept-Encoding", "gzip, deflate, br"},
+			{"Accept-Encoding", "gzip, deflate, br"},
 			{"Accept-Language", "en-US,en;q=0.9"},
 			{"Cookie", HTTP_HEADER_PLACEHOLDER},
 		},
@@ -314,7 +314,9 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 	}
 	session := azuretls.NewSession()
 	session.SetContext(req.Context())
-	session.SetTimeout(time.Duration(netreq.Timeout) * time.Second)
+	if netreq.Timeout > 0 {
+		session.SetTimeout(time.Duration(netreq.Timeout) * time.Second)
+	}
 	if ip.Ja3 != "" {
 		if err := session.ApplyJa3(ip.Ja3, ip.Navigator); err != nil {
 			return nil, fmt.Errorf("failed to set ja3: %v", err)
@@ -377,6 +379,12 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 			return nil, fmt.Errorf("failed to fetch url: <network error>: %v", err)
 		}
 		return nil, fmt.Errorf("failed to fetch url: %v", err)
+	}
+	// For some reason, azuretls returns "content-encoding: gzip/br" header AND non-comprerss plain body for some url.
+	// e.g.: whoami ( https://github.com/traefik/whoami ) page.
+	if res.Header.Get("Content-Encoding") != "" {
+		res.Header.Del("Content-Encoding")
+		res.Header.Del("Content-Length")
 	}
 	return &http.Response{
 		StatusCode: res.StatusCode,

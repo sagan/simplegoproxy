@@ -102,7 +102,7 @@ func main() {
 			}
 		} else if flags.Decrypt {
 			for _, targetUrl := range args {
-				url, _, _, err := proxy.Decrypt(flags.Prefix, targetUrl, "")
+				url, _, _, _, err := proxy.Decrypt(flags.Prefix, targetUrl, "")
 				var display string
 				if err != nil {
 					display = fmt.Sprintf("// %v", err)

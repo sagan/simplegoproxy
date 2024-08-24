@@ -65,6 +65,7 @@ const (
 	VALIDAFTER_STRING      = "validafter"
 	RESPASS_STRING         = "respass" // response body encryption password
 	EID_STRING             = "eid"     // encrypt url id
+	STATUS_STRING          = "status"
 	DEBUG_STRING           = "debug"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
@@ -163,7 +164,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	for key, values := range reqUrlQuery {
 		if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {
 			queryParams[key[len(prefix):]] = values
-		} else if targetUrlObj.Scheme != "data" {
+		} else {
 			targetUrlQuery[key] = values
 		}
 	}
@@ -237,6 +238,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 
 func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, prefix, signkey string,
 	keytypeBlacklist, openScopes []string, rcloneBinary, rcloneConfig string, doLog bool) (*http.Response, error) {
+	originalUrlObj := *urlObj
 	isSigned := queryParams.Get(SIGN_STRING) != ""
 	if isSigned && signkey == "" {
 		return nil, fmt.Errorf("url is signed but signkey is not set")
@@ -272,6 +274,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	responseContentType := ""
 	responseBodyType := ""
 	method := http.MethodGet
+	// -1 : force use original http response status
+	var status = 0
 	keytype := ""
 	sign := ""
 	// password to encrypt final response body to client
@@ -288,6 +292,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		switch key {
 		case EID_STRING, ARG_SRING, ARGS_SRING:
 			// do nothing
+		case STATUS_STRING:
+			status, err = strconv.Atoi(value)
+			if err != nil || (status != 0 && status != -1 && (status < 100 || status > 599)) {
+				return nil, fmt.Errorf("invalid status %q: %v", value, err)
+			}
 		case DEBUG_STRING:
 			debug = true
 		case CORS_STRING:
@@ -398,9 +407,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	}
 	if templateContents != "" {
 		if responseContentType == "" || responseContentType == "html" {
-			resBodyTemplate, err = htmlTemplate.New("template").Parse(templateContents)
+			resBodyTemplate, err = htmlTemplate.New("template").Funcs(templateFuncMap).Parse(templateContents)
 		} else {
-			resBodyTemplate, err = template.New("template").Parse(templateContents)
+			resBodyTemplate, err = template.New("template").Funcs(templateFuncMap).Parse(templateContents)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("invalid template: %v", err)
@@ -531,8 +540,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var req *http.Request
 	var res *http.Response
 	if urlObj.Scheme == "data" {
-		urlObj.RawQuery = ""
-		urlStr := urlObj.String()
+		originalUrlObj.RawQuery = ""
+		urlStr := originalUrlObj.String()
 		// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs
 		dataURL, err := dataurl.DecodeString(urlStr)
 		if err != nil {
@@ -547,7 +556,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			Body: io.NopCloser(bytes.NewReader(dataURL.Data)),
 		}
 	} else {
-		urlStr := urlObj.String()
+		urlStr := originalUrlObj.String()
 		var reqBody io.Reader
 		if forwardBody && srcReq.Body != nil {
 			reqBody = srcReq.Body
@@ -665,11 +674,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if err != nil {
 			return util.ErrResponseMsg("Failed to execute response template: %v", err), nil
 		} else {
-			res.StatusCode = http.StatusOK
+			if status != -1 {
+				res.StatusCode = http.StatusOK
+			}
 			res.Body = io.NopCloser(buf)
+			res.Header.Del("Content-Length")
+			res.Header.Del("Content-Encoding")
 			if responseContentType == "" {
 				res.Header.Set("Content-Type", constants.MIME_HTML)
-				res.Header.Del("Content-Length")
 			}
 		}
 	} else if len(subs) > 0 && res.Body != nil {
@@ -693,6 +705,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 					data = strings.ReplaceAll(data, sub, replace)
 				}
 				res.Header.Del("Content-Length")
+				res.Header.Del("Content-Encoding")
 				res.Body = io.NopCloser(strings.NewReader(data))
 			}
 		}
@@ -710,9 +723,13 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 		res.Header.Set("Content-Type", constants.MIME_TXT)
 		res.Header.Del("Content-Length")
+		res.Header.Del("Content-Encoding")
 		res.Body = io.NopCloser(strings.NewReader(util.EncryptToBase64String(cipher, body)))
 	}
 
+	if status > 0 {
+		res.StatusCode = status
+	}
 	return res, nil
 }
 
@@ -835,40 +852,75 @@ func Generate(targetUrl, eid, key, publicurl, prefix string,
 	return
 }
 
-func Decrypt(prefix, encryptedurl, publicurl string) (plainurl, encryptedEntryurl, eid string, err error) {
-	i := strings.LastIndex(encryptedurl, "?")
-	if i != -1 {
-		encryptedurl = encryptedurl[:i]
-	}
-	i = strings.LastIndex(encryptedurl, "/")
-	if i != -1 {
-		encryptedurl = encryptedurl[i+1:]
-	}
-	if !constants.EncryptedUrlRegex.MatchString(encryptedurl) {
-		return "", "", "", fmt.Errorf("invalid parameters")
-	}
-	if flags.Cipher == nil {
-		return "", "", "", fmt.Errorf("key is empty")
-	}
-	var ciphertext string
-	if i := strings.LastIndex(encryptedurl, "_"); i != -1 {
-		eid = encryptedurl[:i]
-		ciphertext = encryptedurl[i+1:]
+func Decrypt(prefix, fromurl, publicurl string) (plainurl, encryptedEntryurl, entryurl, eid string, err error) {
+	fromurl = strings.TrimPrefix(fromurl, publicurl)
+	if constants.EncryptedUrlRegex.MatchString(fromurl) {
+		if flags.Cipher == nil {
+			return "", "", "", "", fmt.Errorf("key is empty")
+		}
+		var ciphertext string
+		if i := strings.LastIndex(fromurl, "_"); i != -1 {
+			eid = fromurl[:i]
+			ciphertext = fromurl[i+1:]
+		} else {
+			ciphertext = fromurl
+		}
+		plaindata, err := util.Decrypt(flags.Cipher, ciphertext)
+		if err != nil {
+			return "", "", "", "", err
+		}
+		plainurl = string(plaindata)
+		if eid != "" {
+			if urlObj, err := url.Parse(plainurl); err != nil || urlObj.Query().Get(prefix+EID_STRING) != eid {
+				return "", "", "", "", fmt.Errorf("invalid eid")
+			}
+		}
+		if publicurl != "" {
+			encryptedEntryurl = strings.TrimSuffix(publicurl, "/") + "/" + fromurl
+		}
 	} else {
-		ciphertext = encryptedurl
-	}
-	plaindata, err := util.Decrypt(flags.Cipher, ciphertext)
-	if err != nil {
-		return "", "", "", err
-	}
-	plainurl = string(plaindata)
-	if eid != "" {
-		if urlObj, err := url.Parse(plainurl); err != nil || urlObj.Query().Get(prefix+EID_STRING) != eid {
-			return "", "", "", fmt.Errorf("invalid eid")
+		targetUrl := fromurl
+		var modparams url.Values
+		// accept "_sgp_a=1/https://ipcfg.io/json" style url
+		if strings.HasPrefix(fromurl, prefix) {
+			index := strings.Index(fromurl, "/")
+			if index == -1 {
+				return "", "", "", "", fmt.Errorf("invalid url")
+			}
+			modparamsStr := targetUrl[:index]
+			targetUrl = targetUrl[index+1:]
+			modparams, err = url.ParseQuery(modparamsStr)
+			if err != nil {
+				return "", "", "", "", fmt.Errorf("invalid url")
+			}
+		}
+		targetUrlObj, err := url.Parse(targetUrl)
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("invalid url")
+		}
+		if targetUrlObj.Scheme == "" {
+			targetUrlObj.Scheme = "https"
+		}
+		targetUrlQuery := targetUrlObj.Query()
+		targetUrlQuery.Del(prefix + SIGN_STRING)
+		targetUrlQuery.Del(prefix + KEYTYPE_STRING)
+		for key, values := range modparams {
+			if !strings.HasPrefix(key, prefix) {
+				return "", "", "", "", fmt.Errorf("invalid url")
+			}
+			if key == prefix+SIGN_STRING || key == prefix+KEYTYPE_STRING {
+				continue
+			}
+			for _, value := range values {
+				targetUrlQuery.Add(key, value)
+			}
+		}
+		targetUrlObj.RawQuery = targetUrlQuery.Encode()
+		plainurl = targetUrlObj.String()
+		if publicurl != "" {
+			entryurl = strings.TrimSuffix(publicurl, "/") + "/" + fromurl
 		}
 	}
-	if publicurl != "" {
-		encryptedEntryurl = strings.TrimSuffix(publicurl, "/") + "/" + encryptedurl
-	}
-	return plainurl, encryptedEntryurl, eid, nil
+
+	return plainurl, encryptedEntryurl, entryurl, eid, nil
 }

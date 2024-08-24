@@ -171,6 +171,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_keytype=<value>` : The sign key type. See below "Signing key type" section.
 - `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
 - `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
+- `_sgp_status=<value>` : Force set http response status code sent back to client. E.g. `200`, `403`. Special values: `-1` - Use original http response code.
 - `_sgp_resuser=user:pass` : The username & password for http response. See below "Response authorization" section.
 - `_sgp_respass=<value>` : The password to encrypt response body. See below "Response body encrpytion" section.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
@@ -225,9 +226,11 @@ Available variables:
   - `req.header` : Http request header.
 - `err` : Error encountered, if any.
 
-The `res.data` is parsed according to original http response's content-type header. You can also forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
+Notes:
 
-The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
+- The `res.data` is by default parsed according to original http response's content-type header. You can forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
+- The status of rendered response is `200`, use `_sgp_status` parameter to override it.
+- The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
 
 ### Admin UI
 
