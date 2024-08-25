@@ -98,19 +98,21 @@ func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg 
 }
 
 func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist, openScopes []string,
-	supressError, doLog bool, enableUnix, enableFile, enableRclone, enableCurl, enableExec bool,
+	openNormal, supressError, doLog bool, enableUnix, enableFile, enableRclone, enableCurl, enableExec bool,
 	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD) {
 	defer r.Body.Close()
 	reqUrlQuery := r.URL.Query()
 	targetUrl := r.URL.EscapedPath()
-	encryptUrlMode := false
+	// If in encrypted url mode, the original encrypted url
+	var encryltedUrl = ""
 	if constants.EncryptedUrlRegex.MatchString(targetUrl) {
 		var eid string
 		if i := strings.LastIndex(targetUrl, "_"); i != -1 {
 			eid = targetUrl[:i]
 			targetUrl = targetUrl[i+1:]
 		}
-		decrypted, err := util.Decrypt(cipher, targetUrl)
+		encryltedUrl = targetUrl
+		decrypted, err := util.Decrypt(cipher, encryltedUrl)
 		if err != nil {
 			sendError(w, r, supressError, doLog, "Invalid encrypted url: %v", err)
 			return
@@ -128,12 +130,11 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		}
 		targetUrlObj.RawQuery = ""
 		targetUrl = targetUrlObj.String()
-		encryptUrlMode = true
 	}
 
 	var modparams url.Values
 	// accept "_sgp_a=1/https://ipcfg.io/json" style request url
-	if !encryptUrlMode && strings.HasPrefix(targetUrl, prefix) {
+	if encryltedUrl == "" && strings.HasPrefix(targetUrl, prefix) {
 		index := strings.Index(targetUrl, "/")
 		if index == -1 {
 			sendError(w, r, supressError, doLog, "Invalid url")
@@ -185,7 +186,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 			return
 		}
 	} else {
-		if !encryptUrlMode && (queryParams.Has(RESPASS_STRING) || queryParams.Has(RESUSER_STRING)) {
+		if encryltedUrl == "" && (queryParams.Has(RESPASS_STRING) || queryParams.Has(RESUSER_STRING)) {
 			sendError(w, r, supressError, doLog, "url with resuser or respass must be accessed via encrypted url")
 			return
 		}
@@ -217,9 +218,9 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		}
 	}
 	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key,
-		keytypeBlacklist, openScopes, rcloneBinary, rcloneConfig, doLog)
+		keytypeBlacklist, openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrl, doLog)
 	if err != nil {
-		sendError(w, r, supressError, doLog, "Failed to fetch url: %v", err)
+		sendError(w, r, supressError || encryltedUrl != "", doLog, "Failed to fetch url: %v", err)
 		return
 	}
 	if response.Body != nil {
@@ -236,16 +237,24 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	}
 }
 
-func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, prefix, signkey string,
-	keytypeBlacklist, openScopes []string, rcloneBinary, rcloneConfig string, doLog bool) (*http.Response, error) {
+func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, prefix, signkey string, keytypeBlacklist,
+	openScopes []string, openNormal bool, rcloneBinary, rcloneConfig, encryltedUrl string,
+	doLog bool) (*http.Response, error) {
 	originalUrlObj := *urlObj
 	isSigned := queryParams.Get(SIGN_STRING) != ""
 	if isSigned && signkey == "" {
 		return nil, fmt.Errorf("url is signed but signkey is not set")
 	}
-	if !isSigned && signkey != "" && urlObj.Scheme != "data" &&
-		!util.MatchUrlPatterns(openScopes, urlObj.String(), false) {
-		return nil, fmt.Errorf(`sign is required but not found`)
+	if !isSigned && signkey != "" {
+		open := false
+		if openNormal && (urlObj.Scheme == "data" || urlObj.Scheme == "http" || urlObj.Scheme == "https") {
+			open = true
+		} else if urlObj.Scheme != "data" && util.MatchUrlPatterns(openScopes, urlObj.String(), false) {
+			open = true
+		}
+		if !open {
+			return nil, fmt.Errorf(`sign is required but not found`)
+		}
 	}
 
 	var err error
@@ -624,10 +633,16 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	}
 
 	if resBodyTemplate != nil {
+		var srcRequest = map[string]any{
+			"remote_addr": srcReq.RemoteAddr,
+			"header":      srcReq.Header,
+			"url":         srcReq.URL,
+		}
 		var request = map[string]any{}
 		if req != nil {
 			request["method"] = req.Method
 			request["header"] = req.Header
+			request["url"] = req.URL
 		} else {
 			request["method"] = http.MethodGet
 			request["header"] = http.Header{}
@@ -666,10 +681,13 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		response["body"] = string(body)
 		response["data"] = data
 		buf := &bytes.Buffer{}
+		now := time.Now().UTC()
 		err = resBodyTemplate.Execute(buf, map[string]any{
-			"req": request,
-			"res": response,
-			"err": dataerr,
+			"sreq": srcRequest,
+			"req":  request,
+			"res":  response,
+			"err":  dataerr,
+			"now":  now,
 		})
 		if err != nil {
 			return util.ErrResponseMsg("Failed to execute response template: %v", err), nil
@@ -715,16 +733,34 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		if err != nil {
-			return util.ErrResponseMsg("Failed to read body: %v", err), nil
+			return nil, fmt.Errorf("failed to read body: %v", err)
 		}
 		cipher, err := util.GetDeterministicCipher(respass)
 		if err != nil {
-			return util.ErrResponseMsg("Failed to get resbody cipher: %v", err), nil
+			return nil, fmt.Errorf("failed to get resbody cipher: %v", err)
 		}
 		res.Header.Set("Content-Type", constants.MIME_TXT)
 		res.Header.Del("Content-Length")
 		res.Header.Del("Content-Encoding")
-		res.Body = io.NopCloser(strings.NewReader(util.EncryptToBase64String(cipher, body)))
+		encryptedBody := util.EncryptToBase64String(cipher, body)
+		hash := sha256.New()
+		hash.Write([]byte(encryptedBody))
+		sha256hash := hash.Sum(nil)
+		meta := map[string]any{
+			"encrypted_url": encryltedUrl,
+			"date":          time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+			"body_sha256":   hex.EncodeToString(sha256hash),
+			"source_addr":   srcReq.RemoteAddr,
+		}
+		metaJson, err := json.Marshal(meta)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal meta json")
+		}
+		if doLog {
+			log.Printf("x-encryption-meta: %v", meta)
+		}
+		res.Header.Set("X-Encryption-Meta", util.EncryptToBase64String(cipher, metaJson))
+		res.Body = io.NopCloser(strings.NewReader(encryptedBody))
 	}
 
 	if status > 0 {
@@ -852,7 +888,7 @@ func Generate(targetUrl, eid, key, publicurl, prefix string,
 	return
 }
 
-func Decrypt(prefix, fromurl, publicurl string) (plainurl, encryptedEntryurl, entryurl, eid string, err error) {
+func Parse(prefix, fromurl, publicurl string) (plainurl, encryptedEntryurl, entryurl, eid string, err error) {
 	fromurl = strings.TrimPrefix(fromurl, publicurl)
 	if constants.EncryptedUrlRegex.MatchString(fromurl) {
 		if flags.Cipher == nil {

@@ -47,11 +47,8 @@ func main() {
 		flags.EnableCurl = true
 		flags.EnableExec = true
 	}
-	if flags.OpenHttp {
-		flags.OpenScopes = append(flags.OpenScopes, "*://*")
-	}
-	if flags.Key == "" && len(flags.OpenScopes) > 0 {
-		log.Fatalf(`The "open-http" and "open-scope" flags must be used with "key" flag`)
+	if flags.Key == "" && (flags.OpenNormal || len(flags.OpenScopes) > 0) {
+		log.Fatalf(`The "open-normal" and "open-scope" flags must be used with "key" flag`)
 	}
 	if !strings.HasPrefix(flags.Rootpath, "/") {
 		flags.Rootpath = "/" + flags.Rootpath
@@ -70,10 +67,10 @@ func main() {
 	} else if flags.Key == "" {
 		log.Fatalf(`The "pass" flag must be used with "key" flag`)
 	}
-	if flags.Sign && flags.Decrypt {
+	if flags.Sign && flags.Parse {
 		log.Fatalf(`"sign" and "decrypt" flags are not compatible`)
 	}
-	if flags.Sign || flags.Decrypt {
+	if flags.Sign || flags.Parse {
 		if flags.Key == "" || len(args) == 0 {
 			log.Fatalf(`The "key" flag and at least one positional argument (url) must be provided`)
 		}
@@ -100,9 +97,9 @@ func main() {
 				}
 				fmt.Printf("%s  %s\n", canonicalurl, display)
 			}
-		} else if flags.Decrypt {
+		} else if flags.Parse {
 			for _, targetUrl := range args {
-				url, _, _, _, err := proxy.Decrypt(flags.Prefix, targetUrl, "")
+				url, _, _, _, err := proxy.Parse(flags.Prefix, targetUrl, "")
 				var display string
 				if err != nil {
 					display = fmt.Sprintf("// %v", err)
@@ -134,9 +131,9 @@ func main() {
 	}
 
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.OpenScopes, flags.SupressError,
-			flags.Log, flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl, flags.EnableExec,
-			flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher)
+		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.OpenScopes, flags.OpenNormal,
+			flags.SupressError, flags.Log, flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl,
+			flags.EnableExec, flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher)
 	}))
 	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244

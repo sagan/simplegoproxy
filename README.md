@@ -60,8 +60,6 @@ Command-line flag arguments:
         Set "Access-Control-Allow-Origin: *" header for admin API
   -curl-binary string
         Curl binary path (default "curl")
-  -decrypt
-        Decrypt the encrypted url(s)
   -eid string
         Used with "-sign -encrypt". Encrypted url id, it will appear at the start of generated encrypted entrypoint utl
   -enable-all
@@ -86,10 +84,12 @@ Command-line flag arguments:
         Comma-separated list of blacklisted keytypes
   -log
         Log every request urls
-  -open-http
-        Used with request signing, make all http(s) urls do not require signing
+  -open-normal
+        Used with request signing, make all "http(s)" and "data" urls do not require signing
   -open-scope value
         Used with request signing. Array list. Public scopes that urls of these scopes do not require signing. E.g. "http://example.com/*"
+  -parse
+        Parse entrypoint url(s), display original target urls
   -pass string
         Password of admin UI. If not set, the "key" will be used
   -prefix string
@@ -217,20 +217,27 @@ if `_sgp_resbody` parameter is set, Simplegoproxy use it as a [Go template](http
 
 Available variables:
 
-- `res` : The original http response.
-  - `res.status` : http response status code. type: `int`.
-  - `res.header`: http response header. type: `map[string][]string`.
+- `res` : The original http response sent by the target url server.
+  - `res.status` : http response status code, e.g. `200`. type: `int`.
+  - `res.header`: http response header. type: [http.Header](https://pkg.go.dev/net/http#Header).
   - `res.body` : http response body. type: `string`.
   - `res.data` : http response body parsed data object. type: `any`.
 - `req` : The http request sent to the target url server.
-  - `req.header` : Http request header.
+  - `req.url` : http request url. type: [url.URL](https://pkg.go.dev/net/url#URL).
+  - `req.header` : http request header.
+- `sreq` : The original http request sent to the Simplegoproxy server by client.
+  - `sreq.url` : http request url.
+  - `sreq.header` : http request header.
+  - `sreq.remote_addr` : http request source addr, e.g. `192.168.1.1:56789`.
 - `err` : Error encountered, if any.
+- `now` : The now server time. type: [time.Time](https://pkg.go.dev/time#Time).
 
 Notes:
 
 - The `res.data` is by default parsed according to original http response's content-type header. You can forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
-- The status of rendered response is `200`, use `_sgp_status` parameter to override it.
+- The status of rendered response is `200` by default, use `_sgp_status` parameter to override it.
 - The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
+- Some pre-defined functions are available in template, such as `atob` and `btoa`, which do base64 encoding / decoding. For more, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
 
 ### Admin UI
 
@@ -250,9 +257,9 @@ http://localhost:8380/data:text/html;base64,SGVsbG8sIFdvcmxkIQ==
 
 Both of above entrypoint urls will output "Hello, World!". The later one will also set the `Content-Type: text/html` response header.
 
-"data:" urls do not require (enforce) signing, but env substitions do not work if a such url is not signed.
-
 ### `unix://`, `file://`, `rclone://`, `curl+*//`, `exec://` urls
+
+By default, Simplegoproxy only supports `http(s)` and `data` scheme urls.
 
 If `-enable-unix`, `-enable-file`, `-enable-rclone` or `-enable-exec` flag is set, Simplegoproxy will support some additional schemes of urls respectively. If `-enable-all` flag is set, all these schemes will be enabled.
 
@@ -315,8 +322,6 @@ If you pass a `-publicurl http://localhost:8380` flag when invoking the above co
 simplegoproxy -sign -key abc -publicurl "http://localhost:8380" "https://ipinfo.io/ip?_sgp_cors"
 https://ipinfo.io/ip?_sgp_cors=  http://localhost:8380/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors=
 ```
-
-The `data:` urls does not need signing, as they do not actually send any network request or have any side effect.
 
 It's also possible to make some urls do not require signing, see below "Open scopes" section.
 
@@ -395,12 +400,14 @@ When request signing is used, you can define some "open scopes" using `-open-sco
 -open-scope "http://example.com/*"
 ```
 
-This flag can be set multiple times. Target urls of these scopes do not require (enforce) signing. However, env substitutions do not work if a such scope url is not signed. For convenience, `-open-http` flag can be used to make all http(s) urls do not require signing, equivalent to `-open-scope "*://*"`.
+This flag can be set multiple times. Target urls of these scopes do not require (enforce) signing. However, env substitutions do not work if a such scope url is not signed. Some flags can also be used to make certain urls do not require signing:
+
+- `-open-normal`: Make all `http`, `https` and `data` scheme urls do not require signing.
 
 Example:
 
 ```
-simplegoproxy -enable-all -key abc -open-http
+simplegoproxy -enable-all -key abc -open-normal
 ```
 
 ### URL encryption
@@ -423,7 +430,14 @@ If "URL encryption" is used and the `_sgp_respass=uass:pass` parameter is set. T
 
 If "URL encryption" is used and the `_sgp_respass=<value>` parameter is set, Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`.
 
-To decrypt the encrypted response body, see below examples.
+Additionally, the http response has a `X-Encryption-Meta` header, which is the encrypted base64 string of the json object `{body_sha256, date, encrypted_url, source_addr}`:
+
+- `body_sha256` : The sha256 of (encrypted) response body.
+- `date` : The server date time when response is sent back to client. E.g. `2006-01-02T15:04:05Z`.
+- `encrpyted_url` : The original encrypted url that server received.
+- `source_addr` : The source addr of original http request that server received. E.g. `192.168.1.1:56789`.
+
+To decrypt the encrypted response body and the `X-Encrpytion-Meta` header, see below examples.
 
 JavaScript (Browser & Node.js):
 

@@ -11,7 +11,7 @@ const DEFAULT_PORT = 8380 // ASCII (Decimal) 'SP' (83 + 80)
 var (
 	Addr                string
 	Sign                bool
-	Decrypt             bool
+	Parse               bool
 	Log                 bool
 	Encrypt             bool
 	Cors                bool
@@ -21,7 +21,7 @@ var (
 	EnableCurl          bool
 	EnableExec          bool
 	EnableAll           bool
-	OpenHttp            bool
+	OpenNormal          bool
 	SupressError        bool
 	RcloneBinary        string
 	RcloneConfig        string
@@ -59,7 +59,7 @@ func init() {
 	flag.BoolVar(&Log, "log", false, "Log every request urls")
 	flag.BoolVar(&SupressError, "supress-error", false, "Supress error display, send a 404 to client instead")
 	flag.BoolVar(&Encrypt, "encrypt", false, `Used with "-sign", encrypt generated entrypoint url`)
-	flag.BoolVar(&Decrypt, "decrypt", false, `Decrypt the encrypted url(s)`)
+	flag.BoolVar(&Parse, "parse", false, `Parse entrypoint url(s), display original target urls`)
 	flag.BoolVar(&EnableUnix, "enable-unix", false,
 		`Enable unix domain socket url: "unix:///path/to/socket:http://server/path"`)
 	flag.BoolVar(&EnableFile, "enable-file", false, `Enable file scheme url: "file:///path/to/file"`)
@@ -67,7 +67,7 @@ func init() {
 	flag.BoolVar(&EnableExec, "enable-exec", false, `Enable exec scheme url: "exec:///path/to/bin?arg=foo&arg=bar"`)
 	flag.BoolVar(&EnableCurl, "enable-curl", false, `Enable "curl+*" scheme url: "curl+https://ipinfo.io"`)
 	flag.BoolVar(&EnableAll, "enable-all", false, `Enable all schemes url: unix & file & rclone & curl & exec`)
-	flag.BoolVar(&OpenHttp, "open-http", false, `Used with request signing, make all http(s) urls do not require signing`)
+	flag.BoolVar(&OpenNormal, "open-normal", false, `Used with request signing, make all "http(s)" and "data" urls do not require signing`)
 	flag.BoolVar(&Cors, "cors", false, `Set "Access-Control-Allow-Origin: *" header for admin API`)
 	flag.BoolVar(&Sign, "sign", false,
 		`Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)`)

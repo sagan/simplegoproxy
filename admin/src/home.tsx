@@ -19,7 +19,6 @@ interface InputForm {
   fdtype: boolean;
   debug: boolean;
   addon: string;
-  scope: string;
   method: string;
   user: string;
   resuser: string;
@@ -101,13 +100,17 @@ export default function Home({}) {
             >
               SGP
             </a>
-            <a href="https://github.com/sagan/simplegoproxy">ℹ️</a>
+            <a title="Github" href="https://github.com/sagan/simplegoproxy">
+              ℹ️
+            </a>
           </span>
           <input
             type="search"
             className="flex-1"
             placeholder="url"
             autoFocus
+            accessKey="f"
+            title="[alt+shift+f]"
             {...register("url")}
           />
           <label
@@ -231,21 +234,6 @@ export default function Home({}) {
               {...register("keytype")}
             />
           </label>
-          <label>
-            Scope:&nbsp;
-            <input
-              defaultValue={searchParams.get("scope") || ""}
-              {...register("scope")}
-            />
-          </label>
-          <label className="flex flex-1">
-            <span>Addon:&nbsp;</span>
-            <input
-              defaultValue={searchParams.get("addon") || ""}
-              className="flex-1"
-              {...register("addon")}
-            />
-          </label>
           <label title="Set request" className={activeReq ? "active" : ""}>
             <input
               checked={showreq}
@@ -262,6 +250,133 @@ export default function Home({}) {
             />
             &nbsp;Res
           </label>
+          <label title="Add a parameter to addon">
+            Add Parameter&nbsp;
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                let value = e.target.value;
+                if (value == "") {
+                  return;
+                }
+                value = window.__PREFIX__ + value;
+                if (value.indexOf("=") == -1) {
+                  value += "=";
+                }
+                let addon = getValues().addon;
+                if (addon != "" && addon[addon.length - 1] != "&") {
+                  addon += "&";
+                }
+                addon += value;
+                setValue("addon", addon);
+                e.target.value = "";
+              }}
+            >
+              <option value="">(Add)</option>
+              <option title="header_Header=value" value="header_">
+                header_
+              </option>
+              <option title="res_header_Header=value" value="resheader_">
+                resheader_
+              </option>
+              <option title="sub_Search=Replacement" value="sub_">
+                sub_
+              </option>
+              <option title="fdheaders=Header1,Header2" value="fdheaders">
+                fdheaders
+              </option>
+              <option title="referer=http://*.example.com/*" value="referer">
+                referer
+              </option>
+              <option title="origin=http://*.example.com/*" value="origin">
+                origin
+              </option>
+              <option
+                title="validbefore=2006-01-02T15:04:05Z"
+                value="validbefore"
+              >
+                validbefore
+              </option>
+              <option
+                title="validafter=2006-01-02T15:04:05Z"
+                value="validafter"
+              >
+                validafter
+              </option>
+              <option title="proxy=socks5://1.2.3.4:1080" value="proxy">
+                proxy
+              </option>
+              <option value="scope=">scope</option>
+              <option value="scope=*://*/*">scope=*</option>
+              <option value="nocache=1">nocache</option>
+              <option value="forcesub=1">forcesub</option>
+            </select>
+            &nbsp;=&nbsp;
+            <span>
+              <button
+                title="Add parameter value"
+                type="button"
+                onClick={() => {
+                  let value = (prompt("Input a value to encode") || "").trim();
+                  if (!value) {
+                    return;
+                  }
+                  let addon = getValues().addon;
+                  addon += encodeURIComponent(value);
+                  setValue("addon", addon);
+                }}
+              >
+                SetValue
+              </button>
+              <button
+                title="Add env value"
+                type="button"
+                onClick={() => {
+                  let value = (prompt("Input env value") || "").trim();
+                  if (!value) {
+                    return;
+                  }
+                  let addon = getValues().addon;
+                  addon += "__SGPENV_" + value + "__";
+                  setValue("addon", addon);
+                }}
+              >
+                SetEnv
+              </button>
+              <button
+                title="Delete last parameter name or value"
+                type="button"
+                onClick={() => {
+                  let addon = getValues().addon;
+                  let i = -1;
+                  if (addon[addon.length - 1] == "=") {
+                    i = addon.lastIndexOf("&");
+                  } else {
+                    i = addon.lastIndexOf("=");
+                    if (i != -1) {
+                      i++;
+                    }
+                  }
+                  if (i != -1) {
+                    addon = addon.substring(0, i);
+                  } else {
+                    addon = "";
+                  }
+                  setValue("addon", addon);
+                }}
+              >
+                Delete
+              </button>
+            </span>
+          </label>
+        </p>
+        <p className="flex">
+          <textarea
+            placeholder="addon"
+            defaultValue={searchParams.get("addon") || ""}
+            className="flex-1"
+            {...register("addon")}
+          />
         </p>
         {showreq && (
           <>
@@ -581,11 +696,9 @@ export default function Home({}) {
 
   function resetParams(searchParams: URLSearchParams = new URLSearchParams()) {
     let values = NewInputForm();
-    let params: string[][] = [];
-    for (const [key, value] of searchParams) {
-      params.push([key, value]);
-    }
-    for (let [key, value] of params) {
+    values.addon = searchParams.get("addon") || "";
+    searchParams.delete("addon");
+    for (let [key, value] of searchParams) {
       if (
         !key.startsWith(window.__PREFIX__) ||
         key.length == window.__PREFIX__.length
@@ -668,7 +781,6 @@ export default function Home({}) {
     setValue("nocsp", values.nocsp, option);
     setValue("debug", values.debug, option);
     setValue("keytype", values.keytype, option);
-    setValue("scope", values.scope, option);
     setValue("addon", values.addon, option);
     setValue("timeout", values.timeout, option);
     setValue("body", values.body, option);
@@ -781,7 +893,6 @@ function NewInputForm(): InputForm {
     fdauth: false,
     debug: false,
     addon: "",
-    scope: "",
     timeout: 0,
     status: 0,
     fdmethod: false,

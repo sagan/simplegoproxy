@@ -116,7 +116,7 @@ func Generate(params url.Values) (data any, err error) {
 }
 
 func Parse(params url.Values) (any, error) {
-	url, encrypted_entryurl, entryurl, eid, err := proxy.Decrypt(flags.Prefix, params.Get("url"), params.Get("publicurl"))
+	url, encrypted_entryurl, entryurl, eid, err := proxy.Parse(flags.Prefix, params.Get("url"), params.Get("publicurl"))
 	if err != nil {
 		return nil, err
 	}
