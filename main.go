@@ -58,7 +58,7 @@ func main() {
 	}
 	flags.KeytypeBlacklist = util.SplitCsv(flags.KeytypeBlacklistStr)
 	if flags.Key != "" {
-		if flags.Cipher, err = util.GetDeterministicCipher(flags.Key); err != nil {
+		if flags.Cipher, err = util.GetCipher(flags.Key, ""); err != nil {
 			log.Fatalf("Failed to create key cipher: %v", err)
 		}
 	}
@@ -118,7 +118,7 @@ func main() {
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
 	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t, curl=%t, exec=%t\n",
 		flags.EnableFile, flags.EnableUnix, flags.EnableRclone, flags.EnableCurl, flags.EnableExec)
-	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(proxy.TEXTUAL_MIMES, ", "))
+	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(constants.TextualMediatypes, ", "))
 	fmt.Printf("Blacklist keytypes: %v\n", flags.KeytypeBlacklist)
 	fmt.Printf("Admin Web UI at %q with user/pass: %s:***\n", adminPath, flags.User)
 	if len(flags.OpenScopes) > 0 {

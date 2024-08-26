@@ -100,14 +100,14 @@ func TestMatchUrlPattern(t *testing.T) {
 
 func TestEncryptDecrypt(t *testing.T) {
 	pass := "abc"
-	encryptCipher, err := GetDeterministicCipher(pass)
+	encryptCipher, err := GetCipher(pass, "")
 	if err != nil {
 		t.Fatalf("Failed to get encrypt cipher: %v", err)
 	}
 	str := "In God We Trust"
 	cipherstring := EncryptToString(encryptCipher, []byte(str))
 
-	decryptCipher, err := GetDeterministicCipher(pass)
+	decryptCipher, err := GetCipher(pass, "")
 	if err != nil {
 		t.Fatalf("Failed to get decrypt cipher: %v", err)
 	}

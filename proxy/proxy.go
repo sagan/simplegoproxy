@@ -13,7 +13,6 @@ import (
 	htmlTemplate "html/template"
 	"io"
 	"log"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -66,6 +65,7 @@ const (
 	RESPASS_STRING         = "respass" // response body encryption password
 	EID_STRING             = "eid"     // encrypt url id
 	STATUS_STRING          = "status"
+	ENCMODE_STRING         = "encmode"
 	DEBUG_STRING           = "debug"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
@@ -74,15 +74,6 @@ const (
 type Template interface {
 	Execute(wr io.Writer, data any) error
 }
-
-var (
-	TEXTUAL_MIMES = []string{
-		"application/json",
-		"application/xml",
-		"application/atom+xml",
-		"application/x-sh",
-	}
-)
 
 func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg string, args ...any) {
 	errormsg := fmt.Sprintf(msg, args...)
@@ -271,6 +262,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	proxy := ""
 	impersonate := ""
 	timeout := int64(0)
+	encmode := 0
 	cookie := ""
 	user := ""
 	resuser := ""
@@ -299,6 +291,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			value = applyEnv(value)
 		}
 		switch key {
+		case ENCMODE_STRING:
+			encmode, err = strconv.Atoi(value)
+			if err != nil || encmode < 0 {
+				return nil, fmt.Errorf("invalid encmode: %v", err)
+			}
 		case EID_STRING, ARG_SRING, ARGS_SRING:
 			// do nothing
 		case STATUS_STRING:
@@ -652,9 +649,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			"header": res.Header,
 		}
 		if responseBodyType == "" && originalResponseContentType != "" {
-			if ct, _, err := mime.ParseMediaType(originalResponseContentType); err == nil {
-				responseBodyType = ct
-			}
+			responseBodyType = util.ParseMediaType(originalResponseContentType)
 		}
 		var body []byte
 		if res.Body != nil {
@@ -705,11 +700,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	} else if len(subs) > 0 && res.Body != nil {
 		doSub := forcesub
 		if !doSub {
-			if contentType := res.Header.Get("Content-Type"); contentType != "" {
-				mime, _, _ := mime.ParseMediaType(contentType)
-				if mime != "" && (strings.HasPrefix(mime, "text/") || slices.Index(TEXTUAL_MIMES, mime) != -1) {
-					doSub = true
-				}
+			if util.IsTextualMediaType(util.ParseMediaType(res.Header.Get("Content-Type"))) {
+				doSub = true
 			}
 		}
 		if doSub {
@@ -735,32 +727,67 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if err != nil {
 			return nil, fmt.Errorf("failed to read body: %v", err)
 		}
-		cipher, err := util.GetDeterministicCipher(respass)
+		cipher, err := util.GetCipher(respass, srcReq.URL.Query().Get("salt"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to get resbody cipher: %v", err)
 		}
-		res.Header.Set("Content-Type", constants.MIME_TXT)
-		res.Header.Del("Content-Length")
-		res.Header.Del("Content-Encoding")
-		encryptedBody := util.EncryptToBase64String(cipher, body)
-		hash := sha256.New()
-		hash.Write([]byte(encryptedBody))
-		sha256hash := hash.Sum(nil)
-		meta := map[string]any{
-			"encrypted_url": encryltedUrl,
-			"date":          time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-			"body_sha256":   hex.EncodeToString(sha256hash),
-			"source_addr":   srcReq.RemoteAddr,
+		mediaType := util.ParseMediaType(res.Header.Get("Content-Type"))
+		var data map[string]any
+		protectHeaders := encmode&4 != 0 || encmode&2 == 0
+		if protectHeaders {
+			data = map[string]any{
+				"status":        res.StatusCode,
+				"header":        res.Header,
+				"encrypted_url": encryltedUrl,
+				"request_query": srcReq.URL.RawQuery,
+				"date":          time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+				"source_addr":   srcReq.RemoteAddr,
+			}
+			res.StatusCode = http.StatusOK
+			res.Header = http.Header{}
 		}
-		metaJson, err := json.Marshal(meta)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal meta json")
+		if encmode&4 != 0 { // bit 2: whole meta + body in encrypted body
+			bodyIsString := false
+			if encmode&8 == 1 { // bit 3:  Force treat original body as string
+				bodyIsString = true
+			} else if encmode&16 == 1 { // bit 4:  Force treat original body as binary
+				bodyIsString = false
+			} else if util.IsTextualMediaType(mediaType) {
+				bodyIsString = true
+			}
+			if bodyIsString {
+				data["body"] = string(body)
+				data["body_encoding"] = ""
+			} else {
+				data["body"] = base64.StdEncoding.EncodeToString(body)
+				data["body_encoding"] = "base64"
+			}
+			dataJson, err := json.Marshal(data)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal data json")
+			}
+			body = util.Encrypt(cipher, []byte(dataJson))
+		} else {
+			body = util.Encrypt(cipher, body)
+			if encmode&2 == 0 { // bit 1 : encrypt body only
+				hash := sha256.New()
+				hash.Write(body)
+				sha256hash := hash.Sum(nil)
+				data["body_sha256"] = hex.EncodeToString(sha256hash)
+				metaJson, err := json.Marshal(data)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal meta json")
+				}
+				res.Header.Set("X-Encryption-Meta", util.EncryptToBase64String(cipher, metaJson))
+			}
 		}
-		if doLog {
-			log.Printf("x-encryption-meta: %v", meta)
+		if encmode&1 != 0 { // bit 0 : sent cipertext as binary (instead of base64)
+			res.Header.Set("Content-Type", constants.DEFAULT_MIME)
+			res.Body = io.NopCloser(bytes.NewReader(body))
+		} else {
+			res.Header.Set("Content-Type", constants.MIME_TXT)
+			res.Body = io.NopCloser(strings.NewReader(base64.StdEncoding.EncodeToString(body)))
 		}
-		res.Header.Set("X-Encryption-Meta", util.EncryptToBase64String(cipher, metaJson))
-		res.Body = io.NopCloser(strings.NewReader(encryptedBody))
 	}
 
 	if status > 0 {

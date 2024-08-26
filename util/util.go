@@ -1072,16 +1072,30 @@ func Decrypt(cipher cipher.AEAD, ciphertext string) (plaindata []byte, err error
 	return cipher.Open(nil, cipherdata[:cipher.NonceSize()], cipherdata[cipher.NonceSize():], nil)
 }
 
-// Get a deterministic cipher from passphrase,
-// It means the cipher key derives solely from passphrase, no salt is used.
-func GetDeterministicCipher(passphrase string) (cipher.AEAD, error) {
+// Get a cipher from passphrase and salt
+func GetCipher(passphrase string, salt string) (cipher.AEAD, error) {
 	if passphrase == "" {
 		return nil, fmt.Errorf("passphrase can not be empty")
 	}
-	key := pbkdf2.Key([]byte(passphrase), nil, 1000000, 32, sha256.New)
+	key := pbkdf2.Key([]byte(passphrase), []byte(salt), 1000000, 32, sha256.New)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
 	return cipher.NewGCM(block)
+}
+
+// Parse http content-type header and return mediatype, e.g. "text/html".
+func ParseMediaType(contentType string) string {
+	if contentType != "" {
+		if mediatype, _, err := mime.ParseMediaType(contentType); err == nil {
+			return mediatype
+		}
+	}
+	return ""
+}
+
+func IsTextualMediaType(mediatype string) bool {
+	return mediatype != "" &&
+		(strings.HasPrefix(mediatype, "text/") || slices.Index(constants.TextualMediatypes, mediatype) != -1)
 }

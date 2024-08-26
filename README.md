@@ -35,7 +35,7 @@ TOC
   - [Open scopes](#open-scopes)
   - [URL encryption](#url-encryption)
   - [Response authorization](#response-authorization)
-  - [Response body encrpytion](#response-body-encrpytion)
+  - [Response encrpytion](#response-encrpytion)
   - [Referer restrictions](#referer-restrictions)
   - [Origin restrictions](#origin-restrictions)
   - [Error Suppressions and Logging](#error-suppressions-and-logging)
@@ -173,7 +173,8 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
 - `_sgp_status=<value>` : Force set http response status code sent back to client. E.g. `200`, `403`. Special values: `-1` - Use original http response code.
 - `_sgp_resuser=user:pass` : The username & password for http response. See below "Response authorization" section.
-- `_sgp_respass=<value>` : The password to encrypt response body. See below "Response body encrpytion" section.
+- `_sgp_respass=<value>` : The password to encrypt the response. See below "Response encrpytion" section.
+- `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
 - `_sgp_validbefore=<value>`, `_sgp_validafter=<value>` : If set, the entrypoint url can only be used before or after this time accordingly. Value can be any of below time formats: `2006-01-02`, `2006-01-02T15:04:05` `2006-01-02T15:04:05-07:00`, `2006-01-02T15:04:05Z`. All but the last format are parsed in local timezone. The last one are parsed as UTC time. Note to enforce these restrictions, "Request signing" must be enabled.
@@ -426,29 +427,42 @@ The target urls are encrypted using "key" flag value as the cryptographic key. I
 
 If "URL encryption" is used and the `_sgp_respass=uass:pass` parameter is set. The returned http response of Simplegoproxy will require http basic authorization using specified username & password.
 
-### Response body encrpytion
+### Response encrpytion
 
-If "URL encryption" is used and the `_sgp_respass=<value>` parameter is set, Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`.
+If "URL encryption" is used and the `_sgp_respass=<value>` parameter is set, Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (by default no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`.
 
-Additionally, the http response has a `X-Encryption-Meta` header, which is the encrypted base64 string of the json object `{body_sha256, date, encrypted_url, source_addr}`:
+By default, the http response will always has `200` status with only three http headers: `Content-Type: text/plain` and `Content-Length`; Along with the `X-Encryption-Meta` header, which is the encrypted base64 string of the json object `{status, header, body_sha256, date, encrypted_url, request_query, source_addr}`:
 
-- `body_sha256` : The sha256 of (encrypted) response body.
-- `date` : The server date time when response is sent back to client. E.g. `2006-01-02T15:04:05Z`.
-- `encrpyted_url` : The original encrypted url that server received.
-- `source_addr` : The source addr of original http request that server received. E.g. `192.168.1.1:56789`.
+- `status` : (number) The original http response status code. E.g. `200`.
+- `header` : (object) The original http response header.
+- `body_sha256` : (string) The sha256 of (encrypted) response body.
+- `date` : (string) The server date time when response is sent back to client. E.g. `2006-01-02T15:04:05Z`.
+- `encrpyted_url` : (string) The original encrypted url that Simplegoproxy server received.
+- `request_query` : (string) The original http request query string that Simplegoproxy server received.
+- `source_addr` : (string) The source addr of original http request that Simplegoproxy server received. E.g. `192.168.1.1:56789`.
 
-To decrypt the encrypted response body and the `X-Encrpytion-Meta` header, see below examples.
+The `_sgp_encmode` (encryption mode, default to 0) is a bitwise flags integer that can control several encryption behaviors:
+
+- bit 0 (`1`): Make the response body be binary data instead of base64 string.
+- bit 1 (`2`) : Make only response body be encrypted: response header not protected.
+- bit 2 (`4`) : Make the response body be encrypted data of the a JSON object which has the same structure as above `X-Encryption-Meta` header, plus some additional fields: `body`, `body_encoding`. The `body_encoding` indicates the encoding method of `body`, possibly values: empty string, `base64`.
+- bit 3 (`8`) : Used with bit 2 set. Force json "body" field to be original http rersonse string.
+- bit 4 (`16`) : Used with bit 2 set. Force json "body" field to be base64 string of original http rersonse.
+
+Additionally, if the request client sent has the `salt` query variable, it will be used as the salt in PBKDF2 key derivation.
+
+To decrypt the `X-Encrpytion-Meta` header and / or the encrypted response body, see below examples.
 
 JavaScript (Browser & Node.js):
 
 ```javascript
 /**
- * Decrypt the encrypted response body sent by Simplegoproxy. Works in browser and node.js.
+ * Decrypt the encrypted text sent by Simplegoproxy. Works in browser and node.js.
  * @param string ciphertext base64 encoded ciphertext(with iv as prefix)
  * @param string password
  * @return Promise<string> plaintext
  */
-async function aesGcmDecrypt(ciphertext, password) {
+async function aesGcmDecrypt(ciphertext, password, salt = "") {
   const keymaterial = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(password),
@@ -459,7 +473,7 @@ async function aesGcmDecrypt(ciphertext, password) {
   const key = await crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: new Uint8Array(),
+      salt: new TextEncoder().encode(salt),
       iterations: 1000000,
       hash: "SHA-256",
     },

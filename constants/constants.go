@@ -14,6 +14,16 @@ const INFINITE_TIMEOUT = 86400 * 365 * 100
 // match with a encrypted url base62 string
 var EncryptedUrlRegex = regexp.MustCompile(`^([_a-zA-Z0-9]+?_)?[a-zA-Z0-9]{18,}$`)
 
+// textual metiatypes besides "text/*
+var TextualMediatypes = []string{
+	"application/json",
+	"application/xml",
+	"application/yaml",
+	"application/toml",
+	"application/atom+xml",
+	"application/x-sh",
+}
+
 // Copied from Chrome file:// url dir index page.
 // Go html/template format.
 const DIR_INDEX_HTML = `<!DOCTYPE html>

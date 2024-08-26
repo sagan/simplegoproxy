@@ -27,6 +27,7 @@ interface InputForm {
   restype: string;
   impersonate: string;
   status: number;
+  encmode: number;
   timeout: number;
 }
 
@@ -62,6 +63,7 @@ export default function Home({}) {
     !!searchParams.get("status") ||
     !!searchParams.get("resuser") ||
     !!searchParams.get("respass") ||
+    !!searchParams.get("encmode") ||
     !!searchParams.get("resbody") ||
     !!searchParams.get("restype");
   const [showreq, setShowreq] = useState(activeReq);
@@ -507,12 +509,30 @@ export default function Home({}) {
                   {...register("resuser")}
                 />
               </label>
-              <label title="Password to encrypt response body">
+              <label title="Password to encrypt response">
                 <span>Respass:&nbsp;🔑</span>
                 <input
                   defaultValue={searchParams.get("respass") || ""}
                   {...register("respass")}
                 />
+              </label>
+              <label title="Http response encryption mode">
+                Encmode&nbsp;
+                <select
+                  defaultValue={parseInt(searchParams.get("encmode")) || 0}
+                  {...register("encmode", { valueAsNumber: true })}
+                >
+                  <option value="0">(Default) (0)</option>
+                  <option value="1">binary response (1)</option>
+                  <option value="2">body only encryption (2)</option>
+                  <option value="3">Binary(1)+BodyOnly(2) (3)</option>
+                  <option value="4">full protection (4)</option>
+                  <option value="5">Full(4)+Binary(1) (5)</option>
+                  <option value="12">Full(4)+TextBody(8) (12)</option>
+                  <option value="20">Full(4)+BinBody(16) (20)</option>
+                  <option value="13">Full(4)+TextBody(8)+Binary(1) (13)</option>
+                  <option value="21">Full(4)+BinBody(16)+Binary(1) (21)</option>
+                </select>
               </label>
             </p>
             <p className="flex">
@@ -783,6 +803,7 @@ export default function Home({}) {
     setValue("keytype", values.keytype, option);
     setValue("addon", values.addon, option);
     setValue("timeout", values.timeout, option);
+    setValue("encmode", values.encmode, option);
     setValue("body", values.body, option);
     setValue("type", values.type, option);
     setValue("resbody", values.resbody, option);
@@ -895,6 +916,7 @@ function NewInputForm(): InputForm {
     addon: "",
     timeout: 0,
     status: 0,
+    encmode: 0,
     fdmethod: false,
     fdbody: false,
     fdtype: false,
