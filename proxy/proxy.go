@@ -41,6 +41,7 @@ const (
 	NORF_STRING            = "norf"
 	PROXY_STRING           = "proxy"
 	IMPERSONATE_STRING     = "impersonate"
+	TRIMRESHEADER_STRING   = "trimresheader"
 	FORCESUB_STRING        = "forcesub"
 	NOCSP_STRING           = "nocsp"
 	TIMEOUT_STRING         = "timeout"
@@ -105,7 +106,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		encryltedUrl = targetUrl
 		decrypted, err := util.Decrypt(cipher, encryltedUrl)
 		if err != nil {
-			sendError(w, r, supressError, doLog, "Invalid encrypted url: %v", err)
+			sendError(w, r, true, doLog, "Invalid encrypted url: %v", err)
 			return
 		}
 		targetUrl = string(decrypted)
@@ -171,40 +172,40 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	if doLog {
 		log.Printf("Fetch: url=%s, params=%v, src=%s", targetUrlObj, queryParams, r.RemoteAddr)
 	}
+	if encryltedUrl == "" && (queryParams.Has(RESPASS_STRING) || queryParams.Has(RESUSER_STRING)) {
+		sendError(w, r, supressError, doLog, "url with resuser or respass must be accessed via encrypted url")
+		return
+	}
 	if strings.HasPrefix(targetUrlObj.Scheme, "curl+") && len(targetUrlObj.Scheme) > 5 {
 		if !enableCurl {
-			sendError(w, r, supressError, doLog, "curl url is not enabled")
+			sendError(w, r, supressError || encryltedUrl != "", doLog, "curl url is not enabled")
 			return
 		}
 	} else {
-		if encryltedUrl == "" && (queryParams.Has(RESPASS_STRING) || queryParams.Has(RESUSER_STRING)) {
-			sendError(w, r, supressError, doLog, "url with resuser or respass must be accessed via encrypted url")
-			return
-		}
 		switch targetUrlObj.Scheme {
 		case "unix":
 			if !enableUnix {
-				sendError(w, r, supressError, doLog, "unix domain socket is not enabled")
+				sendError(w, r, supressError || encryltedUrl != "", doLog, "unix domain socket is not enabled")
 				return
 			}
 		case "file":
 			if !enableFile {
-				sendError(w, r, supressError, doLog, "file url is not enabled")
+				sendError(w, r, supressError || encryltedUrl != "", doLog, "file url is not enabled")
 				return
 			}
 		case "rclone":
 			if !enableRclone {
-				sendError(w, r, supressError, doLog, "rclone url is not enabled")
+				sendError(w, r, supressError || encryltedUrl != "", doLog, "rclone url is not enabled")
 				return
 			}
 		case "exec":
 			if !enableExec {
-				sendError(w, r, supressError, doLog, "exec url is not enabled")
+				sendError(w, r, supressError || encryltedUrl != "", doLog, "exec url is not enabled")
 				return
 			}
 		case "http", "https", "data": // do nothing
 		default:
-			sendError(w, r, supressError, doLog, "unsupported url scheme %q", targetUrlObj.Scheme)
+			sendError(w, r, supressError || encryltedUrl != "", doLog, "unsupported url scheme %q", targetUrlObj.Scheme)
 			return
 		}
 	}
@@ -255,6 +256,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	cors := false
 	insecure := false
 	forcesub := false
+	trimresheader := false
 	nocsp := false
 	nocache := false
 	norf := false // no redirect following
@@ -311,6 +313,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			insecure = true
 		case FORCESUB_STRING:
 			forcesub = true
+		case TRIMRESHEADER_STRING:
+			trimresheader = true
 		case NOCSP_STRING:
 			nocsp = true
 		case NORF_STRING:
@@ -599,6 +603,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	res.Header.Del("Strict-Transport-Security")
 	res.Header.Del("Clear-Site-Data")
 	res.Header.Del("Set-Cookie")
+	if trimresheader {
+		whitelist := []string{"Content-Type", "Content-Length", "Content-Encoding", "Content-Range"}
+		for key := range res.Header {
+			if !slices.Contains(whitelist, key) {
+				res.Header.Del(key)
+			}
+		}
+	}
 	res.Header.Set("Referrer-Policy", "no-referrer")
 	if cors {
 		res.Header.Set("Access-Control-Allow-Origin", "*")

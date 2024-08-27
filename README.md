@@ -143,6 +143,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 
 - `_sgp_cors` : (Value ignored) Add the CORS-allow-all headers to original response.
 - `_sgp_nocsp` : (Value ignored) Remove the [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP) (CSP) headers from original response.
+- `_sgp_trimresheader` : (Value ignored) Remove all response headers except Content-Type/Length/Encoding/Range.
 - `_sgp_insecure` : (Value ignored) Ignore any TLS cert error in http request.
 - `_sgp_norf` : (Value ignored) Do not follow redirects.
 - `_sgp_nocache` : (Value ignored) Add the no-cache headers to original response.

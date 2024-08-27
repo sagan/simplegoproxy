@@ -29,6 +29,7 @@ interface InputForm {
   status: number;
   encmode: number;
   timeout: number;
+  validtime: number;
 }
 
 const URL_LENGTH_LIMIT = 2048;
@@ -115,6 +116,24 @@ export default function Home({}) {
             title="[alt+shift+f]"
             {...register("url")}
           />
+          <label title="Generated url valid time">
+            <select
+              defaultValue={parseInt(searchParams.get("validtime")) || 0}
+              {...register("validtime", { valueAsNumber: true })}
+            >
+              <option value="0">(No expire)</option>
+              <option value="300">5m valid</option>
+              <option value="3600">1h valid</option>
+              <option value="86400">1d valid</option>
+              <option value="259200">3d valid</option>
+              <option value="604800">1w valid</option>
+              <option value="2592000">1M valid</option>
+              <option value="7776000">3M valid</option>
+              <option value="15552000">6M valid</option>
+              <option value="31622400">1y valid</option>
+              <option value="34300800">13M valid</option>
+            </select>
+          </label>
           <label
             title={`Encryption url id${errors.eid ? ": invalid input" : ""}`}
           >
@@ -225,6 +244,7 @@ export default function Home({}) {
             Timeout:&nbsp;
             <input
               type="number"
+              className="w-12"
               defaultValue={parseInt(searchParams.get("timeout")) || 0}
               {...register("timeout", { valueAsNumber: true })}
             />
@@ -232,6 +252,7 @@ export default function Home({}) {
           <label>
             Keytype:&nbsp;
             <input
+              className="w-16"
               defaultValue={searchParams.get("keytype") || ""}
               {...register("keytype")}
             />
@@ -310,8 +331,30 @@ export default function Home({}) {
               </option>
               <option value="scope=">scope</option>
               <option value="scope=*://*/*">scope=*</option>
-              <option value="nocache=1">nocache</option>
-              <option value="forcesub=1">forcesub</option>
+              <option title="Set no-cache header on response" value="nocache=1">
+                nocache
+              </option>
+              <option
+                title="Trim most response headers except Content-Type/Length/Encoding/Range"
+                value="trimresheader=1"
+              >
+                trimresheader=1
+              </option>
+              <option
+                title="Force do string substitions on any type response"
+                value="forcesub=1"
+              >
+                forcesub=1
+              </option>
+              <option title="No redirect following" value="norf=1">
+                norf=1
+              </option>
+              <option
+                title="Disable TLS/SSL cert verifications"
+                value="insecure=1"
+              >
+                insecure=1
+              </option>
             </select>
             &nbsp;=&nbsp;
             <span>
@@ -587,6 +630,7 @@ export default function Home({}) {
               let index = urls.length - i;
               let res_needauth = false;
               let res_encrypted = false;
+              let validbefore = "";
               try {
                 let urlObj = new URL(url.url);
                 // URL.prototype.get return null for non-exists value !
@@ -596,6 +640,9 @@ export default function Home({}) {
                 res_needauth = !!urlObj.searchParams.get(
                   window.__PREFIX__ + "resuser"
                 );
+                validbefore =
+                  urlObj.searchParams.get(window.__PREFIX__ + "validbefore") ||
+                  "";
               } catch (e) {}
               let accessurl = url.entryurl;
               let encryptedUrl = false;
@@ -645,6 +692,14 @@ export default function Home({}) {
                     {res_encrypted && (
                       <span className="icon" title="Http response is encrypted">
                         🔑
+                      </span>
+                    )}
+                    {validbefore != "" && (
+                      <span
+                        className="icon"
+                        title={`Valid before ${validbefore}`}
+                      >
+                        ⏰
                       </span>
                     )}
                   </td>
@@ -803,6 +858,7 @@ export default function Home({}) {
     setValue("keytype", values.keytype, option);
     setValue("addon", values.addon, option);
     setValue("timeout", values.timeout, option);
+    setValue("validtime", values.validtime, option);
     setValue("encmode", values.encmode, option);
     setValue("body", values.body, option);
     setValue("type", values.type, option);
@@ -816,7 +872,17 @@ export default function Home({}) {
 }
 
 function makeUrl(data: InputForm, prefix: string): string {
-  let { url, fdua, fdauth, fdmethod, fdbody, fdtype, addon, ...others } = data;
+  let {
+    url,
+    validtime,
+    fdua,
+    fdauth,
+    fdmethod,
+    fdbody,
+    fdtype,
+    addon,
+    ...others
+  } = data;
   // Unlike go's url.Parse, JavaScript's URL refues to handle schemeless url
   url = url.trim();
   if (
@@ -868,6 +934,11 @@ function makeUrl(data: InputForm, prefix: string): string {
   if (fdheaders.length > 0) {
     urlObj.searchParams.set(FDHEADERS, fdheaders.join(","));
   }
+  if (validtime > 0) {
+    let validbefore = new Date(+new Date() + validtime * 1000).toISOString(); // "2011-10-05T14:48:00.000Z"
+    validbefore = validbefore.substring(0, 19) + "Z"; // "2011-10-05T14:48:00Z"
+    urlObj.searchParams.set(prefix + "validbefore", validbefore);
+  }
   if (addon != "") {
     let params = new URLSearchParams(addon);
     for (const [key, value] of params) {
@@ -917,6 +988,7 @@ function NewInputForm(): InputForm {
     timeout: 0,
     status: 0,
     encmode: 0,
+    validtime: 0,
     fdmethod: false,
     fdbody: false,
     fdtype: false,
