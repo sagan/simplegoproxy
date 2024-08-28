@@ -29,6 +29,7 @@ import (
 	"golang.org/x/text/transform"
 	"gopkg.in/yaml.v3"
 
+	"github.com/sagan/simplegoproxy/auth"
 	"github.com/sagan/simplegoproxy/constants"
 	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/util"
@@ -52,7 +53,7 @@ const (
 	INSECURE_STRING        = "insecure"
 	COOKIE_STRING          = "cookie"
 	USER_STRING            = "user"
-	RESUSER_STRING         = "resuser" // response http authorization username:password
+	AUTH_STRING            = "auth" // entrypoint url http authorization, username:password
 	FDHEADERS_STRING       = "fdheaders"
 	BODY_STRING            = "body"
 	RESBODY_STRING         = "resbody"
@@ -71,6 +72,7 @@ const (
 	EID_STRING             = "eid"     // encrypt url id
 	STATUS_STRING          = "status"
 	ENCMODE_STRING         = "encmode"
+	AUTHMODE_STRING        = "authmode"
 	DEBUG_STRING           = "debug"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
@@ -95,7 +97,7 @@ func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg 
 
 func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist, openScopes []string,
 	openNormal, supressError, doLog bool, enableUnix, enableFile, enableRclone, enableCurl, enableExec bool,
-	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD) {
+	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD, authenticator *auth.Auth) {
 	defer r.Body.Close()
 	reqUrlQuery := r.URL.Query()
 	targetUrl := r.URL.EscapedPath()
@@ -176,8 +178,8 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	if doLog {
 		log.Printf("Fetch: url=%s, params=%v, src=%s", targetUrlObj, queryParams, r.RemoteAddr)
 	}
-	if encryltedUrl == "" && (queryParams.Has(RESPASS_STRING) || queryParams.Has(RESUSER_STRING)) {
-		sendError(w, r, supressError, doLog, "url with resuser or respass must be accessed via encrypted url")
+	if encryltedUrl == "" && (queryParams.Has(RESPASS_STRING) || queryParams.Has(AUTH_STRING)) {
+		sendError(w, r, supressError, doLog, "url with auth or respass must be accessed via encrypted url")
 		return
 	}
 	if strings.HasPrefix(targetUrlObj.Scheme, "curl+") && len(targetUrlObj.Scheme) > 5 {
@@ -214,7 +216,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		}
 	}
 	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key,
-		keytypeBlacklist, openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrl, doLog)
+		keytypeBlacklist, openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrl, authenticator, doLog)
 	if err != nil {
 		sendError(w, r, supressError || encryltedUrl != "", doLog, "Failed to fetch url: %v", err)
 		return
@@ -234,7 +236,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 }
 
 func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, prefix, signkey string, keytypeBlacklist,
-	openScopes []string, openNormal bool, rcloneBinary, rcloneConfig, encryltedUrl string,
+	openScopes []string, openNormal bool, rcloneBinary, rcloneConfig, encryltedUrl string, authenticator *auth.Auth,
 	doLog bool) (*http.Response, error) {
 	originalUrlObj := *urlObj
 	isSigned := queryParams.Get(SIGN_STRING) != ""
@@ -271,9 +273,10 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	impersonate := ""
 	timeout := int64(0)
 	encmode := 0
+	authmode := 0
 	cookie := ""
 	user := ""
-	resuser := ""
+	authuser := ""
 	fdheaders := ""
 	body := ""
 	forwardBody := false
@@ -303,6 +306,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			encmode, err = strconv.Atoi(value)
 			if err != nil || encmode < 0 {
 				return nil, fmt.Errorf("invalid encmode: %v", err)
+			}
+		case AUTHMODE_STRING:
+			authmode, err = strconv.Atoi(value)
+			if err != nil || authmode < 0 {
+				return nil, fmt.Errorf("invalid authmode: %v", err)
 			}
 		case EID_STRING, ARG_SRING, ARGS_SRING:
 			// do nothing
@@ -340,8 +348,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			cookie = value
 		case USER_STRING:
 			user = value
-		case RESUSER_STRING:
-			resuser = value
+		case AUTH_STRING:
+			authuser = value
 		case METHOD_STRING:
 			method = strings.ToUpper(value)
 		case FDHEADERS_STRING:
@@ -558,19 +566,17 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 	}
 
-	if resuser != "" {
-		username, password, _ := strings.Cut(resuser, ":")
-		if username == "" && password == "" {
-			return nil, fmt.Errorf("invalid resuser, username and password can not be both empty")
+	if authuser != "" {
+		username, password, _ := strings.Cut(authuser, ":")
+		if username == "" {
+			return nil, fmt.Errorf("invalid auth, username must not be empty")
 		}
-		user, pass, ok := srcReq.BasicAuth()
-		if !ok || username != user || password != pass {
-			return &http.Response{
-				StatusCode: http.StatusUnauthorized,
-				Header: http.Header{
-					"WWW-Authenticate": []string{`Basic realm="website"`},
-				},
-			}, nil
+		basic := authmode&1 == 0
+		if errres, err := authenticator.CheckAuth(srcReq, username, password, basic); err != nil {
+			if doLog {
+				log.Printf("Auth failed: %v", err)
+			}
+			return errres, nil
 		}
 	}
 

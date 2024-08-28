@@ -18,8 +18,9 @@ TOC
 - [Run](#run)
 - [Usage](#usage)
 - [Modification parameters](#modification-parameters)
-- [Other features](#other-features)
+- [Features](#features)
   - [Modification parameters fronting](#modification-parameters-fronting)
+  - [Response body substitutions](#response-body-substitutions)
   - [Impersonate the Browser](#impersonate-the-browser)
   - [Response template](#response-template)
   - [Admin UI](#admin-ui)
@@ -34,7 +35,7 @@ TOC
   - [Scope signing](#scope-signing)
   - [Open scopes](#open-scopes)
   - [URL encryption](#url-encryption)
-  - [Response authorization](#response-authorization)
+  - [Request authentication](#request-authentication)
   - [Response encrpytion](#response-encrpytion)
   - [Referer restrictions](#referer-restrictions)
   - [Origin restrictions](#origin-restrictions)
@@ -153,8 +154,10 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_method=GET` : Set the method for the http request. Default to `GET`.
 - `_sgp_header_<any>=<value>` : Set the request header. E.g.: `_sgp_header_Authorization=Token%20abcdef` will set the "Authorization: Token abcdef" request header. If value is empty, will remove the target header from request.
 - `_sgp_resheader_<any>=<value>` : Similar to `_sgp_header_`, but set or remove the response header.
-- `_sgp_sub_<string>=<replacement>` : Similar to nginx [http_sub](https://nginx.org/en/docs/http/ngx_http_sub_module.html) module, modifiy the response by replacing one specified string by another. By default `_sgp_sub_` rules only apply to the response with a "textual" [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types), which could be any one of the following: "text/\*", "application/json", "application/xml", "application/atom+xml", "application/x-sh".
-- `_sgp_forcesub` : (Value ignored) Force apply `_sgp_sub_` rules to the response of any MIME type.
+- `_sgp_sub_<string>=<replacement>` : Response body substitutions. Similar to nginx [http_sub](https://nginx.org/en/docs/http/ngx_http_sub_module.html) module. See below "Response body substitutions" section.
+- `_sgp_subr_<Regexp>=<replacement>` : Similar to `_spg_sub_*` but do regexp find and replacement.
+- `_sgp_subb_<HexString>=<replacement>` : Similar to `_spg_sub_*` but do binary bytes find and replacement.
+- `_sgp_forcesub` : (Value ignored) Force do response body substitutions on any MIME type response.
 - `_sgp_cookie=<value>` : Set request cookie. Equivalent to `_sgp_header_cookie=<value>`.
 - `_sgp_type=<value>` : Set the request content type. Equivalent to `_sgp_header_Content-Type=<value>`. If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
 - `_sgp_restype=<value>` : Set the response content type. Equivalent to `_sgp_resheader_Content-Type=<value>`. Additionally, `_sgp_type` and `_sgp_restype` also accept file extension values like `txt` or `.txt` (with or without leading dot), in which case it will use the MIME type associated with the file extension ext.
@@ -173,7 +176,8 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
 - `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
 - `_sgp_status=<value>` : Force set http response status code sent back to client. E.g. `200`, `403`. Special values: `-1` - Use original http response code.
-- `_sgp_resuser=user:pass` : The username & password for http response. See below "Response authorization" section.
+- `_sgp_auth=user:pass` : The auth username & password for request to the Simplegoproxy server. See below "Request authentication" section.
+- `_sgp_authmode=1` : The request authentication mode. See below "Request authentication" section.
 - `_sgp_respass=<value>` : The password to encrypt the response. See below "Response encrpytion" section.
 - `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
@@ -184,7 +188,7 @@ Modification paramaters are set in Query Variables. All `_sgp_*` parameters are 
 
 All "escapable" characters in paramater name & value should be escaped in '%XX' format. (In general, the "escapable" means JavaScript's `encodeURIComponent` function return a escaped string for the char)
 
-## Other features
+## Features
 
 ### Modification parameters fronting
 
@@ -193,6 +197,18 @@ Instead of using Query Variables to set modification parameters, You can also pu
 ```
 http://localhost:8380/_sgp_cors/https://ipcfg.co/json
 ```
+
+### Response body substitutions
+
+Response body substitutions modify the original http response returned by the target url server, replacing one certain string (needle) with another (replacement). It's somewhat similar to nginx [http_sub](https://nginx.org/en/docs/http/ngx_http_sub_module.html) module.
+
+By default response body substitutions only apply to the response with a "textual" [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types), which could be any one of the following: `text/*`, `application/json`, `application/xml`, `application/yaml`, `application/toml`, `application/atom+xml`, `application/x-sh`. Set the `_sgp_forcesub=1` parameter to force do substitutions on any MIME type response.
+
+To do response body substitutions, use any of the following parameters to set the find-and-replace rule(s). These parameters can be specified multiple times. Note both the needle and replacement part of the string should be url encoded.
+
+- `_sgp_sub_<string>=<replacement>` : Do basic string find and replacement. E.g. `_sgp_sub_org=ORG`: `org` => `ORG`.
+- `_sgp_subr_<Regexp>=<replacement>` : Do regexp find and replacement. E.g. `_sgp_subr_No.%5Cs*(%5Cd%2B)=no-$1`: `No.\s*(\d+)` => `no-$1`, it will search for patterns like `No. 123` and replace it with `no-123`.
+- `_sgp_subb_<HexString>=<replacement>` : Do binary find and replacement. Use hex string format. E.g. `_sgp_subb_aabb=ccdd`: `aa bb` => `cc dd`.
 
 ### Impersonate the Browser
 
@@ -239,7 +255,7 @@ Notes:
 - The `res.data` is by default parsed according to original http response's content-type header. You can forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
 - The status of rendered response is `200` by default, use `_sgp_status` parameter to override it.
 - The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
-- Some pre-defined functions are available in template, such as `atob` and `btoa`, which do base64 encoding / decoding. For more, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
+- Some pre-defined functions are available in template, such as `atob` and `btoa`, which do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob). For more, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
 
 ### Admin UI
 
@@ -424,9 +440,13 @@ It's possible to prepand a fixed `eid` (encrypted url id) string to the beginnin
 
 The target urls are encrypted using "key" flag value as the cryptographic key. If you change the key, all previously generated entrypoint urls will be inaccessible.
 
-### Response authorization
+### Request authentication
 
-If "URL encryption" is used and the `_sgp_respass=uass:pass` parameter is set. The returned http response of Simplegoproxy will require http basic authorization using specified username & password.
+If the `_sgp_auth=uass:pass` parameter is set, the request to the entrypoint url will require http access authentication using specified username & password.
+
+Note only the encrpyted form entrypoint url can be used if the `_sgp_auth` parameter is set.
+
+By default it uses [basic access authentication](https://en.wikipedia.org/wiki/Basic_access_authentication). If `_sgp_authmode` (bitwise flags integer) is set to `1`, it will use [digest access authentication](https://en.wikipedia.org/wiki/Digest_access_authentication).
 
 ### Response encrpytion
 
@@ -505,5 +525,7 @@ It works in the same way as the above "Referer restrictions" feature except that
 ### Error Suppressions and Logging
 
 By default, when Simplegoproxy web server encounters an error handling a request (e.g. signing verification failed), it displays the error to the client. If `-supress-error` flag is set, it will supress the error display, always sending a standard "404 Not Found" page to client if any error happens.
+
+The Error Suppressions is forcibly enabled if current request is accessed via encrpyted form entrypoint url.
 
 Also, by default Simplegoproxy does not log incoming requests and / or errors. To do the logging, set the `-log` flag, the log will outputted to stdout.

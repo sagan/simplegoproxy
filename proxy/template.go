@@ -14,13 +14,13 @@ import (
 var templateFuncMap map[string]any
 
 // Base64 decode
-func btoa(input any) string {
+func atob(input any) string {
 	output, _ := base64.StdEncoding.DecodeString(any2string(input))
 	return string(output)
 }
 
 // Base64 encode
-func atob(input any) string {
+func btoa(input any) string {
 	return base64.StdEncoding.EncodeToString([]byte(any2string(input)))
 }
 

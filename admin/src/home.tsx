@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "@rehooks/local-storage";
 import { Generate, GenerateRequest, fetchParse, fetchGenerate } from "./api.js";
+import { generatePassword } from "./funcs.js";
 
 interface InputForm {
   url: string;
@@ -21,13 +22,14 @@ interface InputForm {
   addon: string;
   method: string;
   user: string;
-  resuser: string;
+  auth: string;
   respass: string;
   type: string;
   restype: string;
   impersonate: string;
   status: number;
   encmode: number;
+  authmode: number;
   timeout: number;
   validtime: number;
 }
@@ -62,9 +64,10 @@ export default function Home({}) {
     !!searchParams.get("body");
   const activeRes =
     !!searchParams.get("status") ||
-    !!searchParams.get("resuser") ||
+    !!searchParams.get("auth") ||
     !!searchParams.get("respass") ||
     !!searchParams.get("encmode") ||
+    !!searchParams.get("authmode") ||
     !!searchParams.get("resbody") ||
     !!searchParams.get("restype");
   const [showreq, setShowreq] = useState(activeReq);
@@ -283,14 +286,11 @@ export default function Home({}) {
                   return;
                 }
                 value = window.__PREFIX__ + value;
-                if (
-                  value.indexOf("=") == -1 &&
-                  value[value.length - 1] != "_"
-                ) {
+                if (value.indexOf("=") == -1 && !value.endsWith("_")) {
                   value += "=";
                 }
                 let addon = getValues().addon;
-                if (addon != "" && addon[addon.length - 1] != "&") {
+                if (addon != "" && !addon.endsWith("&")) {
                   addon += "&";
                 }
                 addon += value;
@@ -307,6 +307,12 @@ export default function Home({}) {
               </option>
               <option title="sub_Search=Replacement" value="sub_">
                 sub_
+              </option>
+              <option title="subr_Regexp=Replacement" value="subr_">
+                subr_
+              </option>
+              <option title="subb_HexString=Replacement" value="subb_">
+                subb_
               </option>
               <option title="fdheaders=Header1,Header2" value="fdheaders">
                 fdheaders
@@ -372,8 +378,8 @@ export default function Home({}) {
                   let addon = getValues().addon;
                   if (
                     addon.length > 0 &&
-                    addon[addon.length - 1] != "=" &&
-                    addon[addon.length - 1] != "_"
+                    !addon.endsWith("=") &&
+                    !addon.endsWith("_")
                   ) {
                     addon += "=";
                   }
@@ -404,7 +410,7 @@ export default function Home({}) {
                 onClick={() => {
                   let addon = getValues().addon;
                   let i = -1;
-                  if (addon[addon.length - 1] == "=") {
+                  if (addon.endsWith("=")) {
                     i = addon.lastIndexOf("&");
                   } else {
                     i = addon.lastIndexOf("=");
@@ -435,7 +441,7 @@ export default function Home({}) {
         </p>
         {showreq && (
           <>
-            <p className="flex">
+            <p className="flex flex-wrap">
               <label title="Http request method">
                 Method&nbsp;
                 <select
@@ -523,7 +529,7 @@ export default function Home({}) {
         )}
         {showres && (
           <>
-            <p className="flex">
+            <p className="flex flex-wrap">
               <label title="Http response status">
                 Status&nbsp;
                 <select
@@ -554,28 +560,59 @@ export default function Home({}) {
                   <option value="yaml">yaml</option>
                 </select>
               </label>
-              <label title="Http response basic auth user">
-                <span>Resuser:&nbsp;🪪</span>
+              <label title="Http authentication to the entrypoint url">
+                <span>Auth:&nbsp;🪪</span>
                 <input
                   placeholder="user:pass"
-                  defaultValue={searchParams.get("resuser") || ""}
-                  {...register("resuser")}
+                  defaultValue={searchParams.get("auth") || ""}
+                  {...register("auth")}
                 />
+                <button
+                  type="button"
+                  title="Generate a random authorization password"
+                  onClick={() => {
+                    let auth = getValues().auth.trim();
+                    let [user] = auth.split(":");
+                    auth = (user || "user") + ":" + generatePassword();
+                    setValue("auth", auth);
+                  }}
+                >
+                  🎲
+                </button>
+                <select
+                  title="Http response authorization mode"
+                  defaultValue={parseInt(searchParams.get("authmode")) || 0}
+                  {...register("authmode", { valueAsNumber: true })}
+                >
+                  <option value="0" title="Basic Auth (0)">
+                    Basic
+                  </option>
+                  <option value="1" title="Digest Auth (1)">
+                    Digest
+                  </option>
+                </select>
               </label>
               <label title="Password to encrypt response">
                 <span>Respass:&nbsp;🔑</span>
                 <input
+                  className="w-16"
                   defaultValue={searchParams.get("respass") || ""}
                   {...register("respass")}
                 />
-              </label>
-              <label title="Http response encryption mode">
-                Encmode&nbsp;
+                <button
+                  type="button"
+                  title="Generate a random encryption password"
+                  onClick={() => {
+                    setValue("respass", generatePassword());
+                  }}
+                >
+                  🎲
+                </button>
                 <select
                   defaultValue={parseInt(searchParams.get("encmode")) || 0}
                   {...register("encmode", { valueAsNumber: true })}
                 >
-                  <option value="0">(Default) (0)</option>
+                  <option value="0">(Default encryption mode) (0)</option>
                   <option value="1">binary response (1)</option>
                   <option value="2">body only encryption (2)</option>
                   <option value="3">Binary(1)+BodyOnly(2) (3)</option>
@@ -638,7 +675,7 @@ export default function Home({}) {
           <tbody>
             {urls.map((url, i) => {
               let index = urls.length - i;
-              let res_needauth = false;
+              let needauth = false;
               let res_encrypted = false;
               let validbefore = "";
               try {
@@ -647,8 +684,8 @@ export default function Home({}) {
                 res_encrypted = !!urlObj.searchParams.get(
                   window.__PREFIX__ + "respass"
                 );
-                res_needauth = !!urlObj.searchParams.get(
-                  window.__PREFIX__ + "resuser"
+                needauth = !!urlObj.searchParams.get(
+                  window.__PREFIX__ + "auth"
                 );
                 validbefore =
                   urlObj.searchParams.get(window.__PREFIX__ + "validbefore") ||
@@ -658,7 +695,7 @@ export default function Home({}) {
               let encryptedUrl = false;
               if (
                 (url.encrypted_entryurl != "" &&
-                  (encrypt || res_needauth || res_encrypted)) ||
+                  (encrypt || needauth || res_encrypted)) ||
                 (accessurl == "" && url.encrypted_entryurl != "")
               ) {
                 accessurl = url.encrypted_entryurl;
@@ -691,10 +728,10 @@ export default function Home({}) {
                         🔒
                       </span>
                     )}
-                    {res_needauth && (
+                    {needauth && (
                       <span
                         className="icon"
-                        title="Http response needs basic authorization"
+                        title="Request to the entrypoint url needs authentication"
                       >
                         🪪
                       </span>
@@ -860,7 +897,7 @@ export default function Home({}) {
     setValue("fdtype", values.fdtype, option);
     setValue("method", values.method, option);
     setValue("user", values.user, option);
-    setValue("resuser", values.resuser, option);
+    setValue("auth", values.auth, option);
     setValue("respass", values.respass, option);
     setValue("cors", values.cors, option);
     setValue("nocsp", values.nocsp, option);
@@ -870,6 +907,7 @@ export default function Home({}) {
     setValue("timeout", values.timeout, option);
     setValue("validtime", values.validtime, option);
     setValue("encmode", values.encmode, option);
+    setValue("authmode", values.authmode, option);
     setValue("body", values.body, option);
     setValue("type", values.type, option);
     setValue("resbody", values.resbody, option);
@@ -998,12 +1036,13 @@ function NewInputForm(): InputForm {
     timeout: 0,
     status: 0,
     encmode: 0,
+    authmode: 0,
     validtime: 0,
     fdmethod: false,
     fdbody: false,
     fdtype: false,
     method: "",
-    resuser: "",
+    auth: "",
     respass: "",
     eid: "",
     restype: "",

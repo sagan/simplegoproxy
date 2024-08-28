@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sagan/simplegoproxy/admin"
+	"github.com/sagan/simplegoproxy/auth"
 	"github.com/sagan/simplegoproxy/constants"
 	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/proxy"
@@ -129,11 +130,11 @@ func main() {
 	if flags.Key == "" && (flags.EnableFile || flags.EnableUnix || flags.EnableRclone || flags.EnableCurl || flags.EnableExec) {
 		fmt.Printf("WARNING! Enabing non-http schemes without using signing is risky. You should only do it in local / test / sandbox env\n")
 	}
-
+	authenticator := auth.NewAuthenticator("website", false)
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.OpenScopes, flags.OpenNormal,
 			flags.SupressError, flags.Log, flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl,
-			flags.EnableExec, flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher)
+			flags.EnableExec, flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher, authenticator)
 	}))
 	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244
