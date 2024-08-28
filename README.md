@@ -160,10 +160,11 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_forcesub` : (Value ignored) Force do response body substitutions on any MIME type response.
 - `_sgp_cookie=<value>` : Set request cookie. Equivalent to `_sgp_header_cookie=<value>`.
 - `_sgp_type=<value>` : Set the request content type. Equivalent to `_sgp_header_Content-Type=<value>`. If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
-- `_sgp_restype=<value>` : Set the response content type. Equivalent to `_sgp_resheader_Content-Type=<value>`. Additionally, `_sgp_type` and `_sgp_restype` also accept file extension values like `txt` or `.txt` (with or without leading dot), in which case it will use the MIME type associated with the file extension ext.
+- `_sgp_restype=<value>` : Set the response content type. Equivalent to `_sgp_resheader_Content-Type=<value>`. Additionally, `_sgp_type` and `_sgp_restype` also accept file extension values like `txt` or `html`, in which case it will use the MIME type associated with the file extension ext; it's also the recommended way to set these two parameters.
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_resbody=<value>` : Set the response body template.
-- `_sgp_resbodytype=<value>` : The original response body type, e.g. json, xml, yaml, toml.
+- `_sgp_resbodytype=<value>` : The original response body type, e.g. `json`, `xml`, `yaml`, `toml`.
+- `_sgp_resbodytpl` : (Value ignored) Use original response body as template string.
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. By default some headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`. Some values have special meanings:
   - `*`: ALL request headers.
   - `%0A` (\n) : Supresses default forwarding headers and makes sure no headers would be forwarded.
@@ -228,34 +229,55 @@ Simplegoproxy will print the list of supported targets when starting. Currently 
 if `_sgp_resbody` parameter is set, Simplegoproxy use it as a [Go template](https://pkg.go.dev/text/template) for renderring response body. E.g.:
 
 ```
-{{.res.status}}
+{{.Res.Status}}
 
-{{.res.body}}
+{{.Res.Body}}
 ```
 
-Available variables:
+The context (available variables):
 
-- `res` : The original http response sent by the target url server.
-  - `res.status` : http response status code, e.g. `200`. type: `int`.
-  - `res.header`: http response header. type: [http.Header](https://pkg.go.dev/net/http#Header).
-  - `res.body` : http response body. type: `string`.
-  - `res.data` : http response body parsed data object. type: `any`.
-- `req` : The http request sent to the target url server.
-  - `req.url` : http request url. type: [url.URL](https://pkg.go.dev/net/url#URL).
-  - `req.header` : http request header.
-- `sreq` : The original http request sent to the Simplegoproxy server by client.
-  - `sreq.url` : http request url.
-  - `sreq.header` : http request header.
-  - `sreq.remote_addr` : http request source addr, e.g. `192.168.1.1:56789`.
-- `err` : Error encountered, if any.
-- `now` : The now server time. type: [time.Time](https://pkg.go.dev/time#Time).
+- `Params` : The all `_sgp_*` parameters of current request (param names don't have `_sgp_` prefix). type: [url.Values](https://pkg.go.dev/net/url#Values).
+- `Res` : The original http response sent by the target url server.
+  - `Res.Status` : http response status code, e.g. `200`. type: `int`.
+  - `Res.Header`: http response header. type: [http.Header](https://pkg.go.dev/net/http#Header).
+  - `Res.Body` : http response body. type: `string`.
+  - `Res.Data` : http response body parsed data object. type: `any`.
+- `Req` : The http request sent to the target url server.
+  - `Req.URL` : http request url. type: [url.URL](https://pkg.go.dev/net/url#URL).
+  - `Req.Header` : http request header.
+- `SrcReq` : The original http request sent to the Simplegoproxy server by client.
+  - `SrcReq.URL` : http request url.
+  - `SrcReq.Header` : http request header.
+  - `SrcReq.RemoteAddr` : http request source addr, e.g. `192.168.1.1:56789`.
+- `Err` : Error encountered, if any.
+- `Now` : The now server time. type: [time.Time](https://pkg.go.dev/time#Time).
 
 Notes:
 
 - The `res.data` is by default parsed according to original http response's content-type header. You can forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
 - The status of rendered response is `200` by default, use `_sgp_status` parameter to override it.
 - The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
-- Some pre-defined functions are available in template, such as `atob` and `btoa`, which do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob). For more, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
+- If `_sgp_restype` is set to "html", the template renderring will use Go [html/template](https://pkg.go.dev/html/template); otherwise it will use Go [text/template](https://pkg.go.dev/text/template).
+- Some pre-defined functions are available in template, such as `atob` and `btoa`, which do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob). For details, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
+- If current entrypoint url is signed, some powerful have-side-effect functions will be available in templates:
+  - `fetch(url, options...)` : Do a arbitary http request, return `{Err, Status, Header, Body, Data}`, where `Body` is response string and `Data` is response body parsed data object. The `options` args is an string array which elements could be any of: http method (e.g. `GET`), http header (e.g. `Content-Type: text/plain`), http request body (starts with `@`, e.g. `@a=1&b=2`).
+- Some special functions can be used in templates to change the response status code and / or header. These functions always return empty string.
+  - `set_status(status)` : Set response status code.
+  - `set_header(key, value)` : Set a response header. If value is empty string, delete the header instead.
+
+One more thing, if `_sgp_resbodytpl` parameter is set, Simplegoproxy will treat the original response body of target url server as the template string, renderring it using the above context; The `_sgp_resbody` will serve as `Res.Body` context variable instead in this case.
+
+Template example:
+
+```
+{{- set_status 404 -}}
+{{- set_header "Content-Type" "text/html" -}}
+
+{{with $x := fetch "https://ipinfo.io" }}
+raw body: {{ $x.Body }}
+city: {{ $x.Data.city }}
+{{end}}
+```
 
 ### Admin UI
 

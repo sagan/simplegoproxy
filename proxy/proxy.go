@@ -13,6 +13,7 @@ import (
 	htmlTemplate "html/template"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -73,6 +74,7 @@ const (
 	STATUS_STRING          = "status"
 	ENCMODE_STRING         = "encmode"
 	AUTHMODE_STRING        = "authmode"
+	RESBODYTPL_STRING      = "resbodytpl" // use response body as template
 	DEBUG_STRING           = "debug"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
@@ -269,6 +271,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	nocache := false
 	norf := false // no redirect following
 	debug := false
+	resbodytpl := false
 	proxy := ""
 	impersonate := ""
 	timeout := int64(0)
@@ -319,6 +322,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			if err != nil || (status != 0 && status != -1 && (status < 100 || status > 599)) {
 				return nil, fmt.Errorf("invalid status %q: %v", value, err)
 			}
+		case RESBODYTPL_STRING:
+			resbodytpl = true
 		case DEBUG_STRING:
 			debug = true
 		case CORS_STRING:
@@ -450,11 +455,40 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
 	}
-	if templateContents != "" {
-		if responseContentType == "" || responseContentType == "html" {
-			resBodyTemplate, err = htmlTemplate.New("template").Funcs(templateFuncMap).Parse(templateContents)
+
+	var tplStatus int
+	var tplHeader http.Header
+	var tplFuncs template.FuncMap
+	if templateContents != "" || resbodytpl {
+		tplStatus = 0
+		tplHeader = http.Header{}
+		// dummy side effect template funcs to update request-scope state
+		tplFuncs = template.FuncMap{
+			"set_status": func(input any) string {
+				tplStatus, _ = strconv.Atoi(any2string(input))
+				return ""
+			},
+			"set_header": func(key, value any) string {
+				keyStr := any2string(key)
+				valueStr := any2string(value)
+				if valueStr == "" {
+					tplHeader.Del(keyStr)
+				} else {
+					tplHeader.Set(keyStr, valueStr)
+				}
+				return ""
+			},
+		}
+		maps.Copy(tplFuncs, templateFuncMap)
+		if isSigned {
+			maps.Copy(tplFuncs, templateAdminFuncMap)
+		}
+	}
+	if templateContents != "" && !resbodytpl {
+		if responseContentType == "html" {
+			resBodyTemplate, err = htmlTemplate.New("template").Funcs(tplFuncs).Parse(templateContents)
 		} else {
-			resBodyTemplate, err = template.New("template").Funcs(templateFuncMap).Parse(templateContents)
+			resBodyTemplate, err = template.New("template").Funcs(tplFuncs).Parse(templateContents)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("invalid template: %v", err)
@@ -684,60 +718,83 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		res.Header.Del("Content-Encoding")
 	}
 
+	if resbodytpl && res.Body != nil {
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		res.Body = nil
+		if err != nil {
+			return util.ErrResponseMsg("Failed to read body: %v", err), nil
+		}
+		if responseContentType == "html" {
+			resBodyTemplate, err = htmlTemplate.New("template").Funcs(tplFuncs).Parse(string(body))
+		} else {
+			resBodyTemplate, err = template.New("template").Funcs(tplFuncs).Parse(string(body))
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid bodytpl template: %v", err)
+		}
+	}
+
 	if resBodyTemplate != nil {
+		var tplerr error
 		var srcRequest = map[string]any{
-			"remote_addr": srcReq.RemoteAddr,
-			"header":      srcReq.Header,
-			"url":         srcReq.URL,
+			"RemoteAddr": srcReq.RemoteAddr,
+			"Header":     srcReq.Header,
+			"URL":        srcReq.URL,
 		}
 		var request = map[string]any{}
 		if req != nil {
-			request["method"] = req.Method
-			request["header"] = req.Header
-			request["url"] = req.URL
+			request["Method"] = req.Method
+			request["Header"] = req.Header
+			request["URL"] = req.URL
 		} else {
-			request["method"] = http.MethodGet
-			request["header"] = http.Header{}
+			request["Method"] = http.MethodGet
+			request["Header"] = http.Header{}
 		}
 		var response = map[string]any{
-			"status": res.StatusCode,
-			"header": res.Header,
+			"Status": res.StatusCode,
+			"Header": res.Header,
 		}
 		if responseBodyType == "" && originalResponseContentType != "" {
 			responseBodyType = util.ParseMediaType(originalResponseContentType)
 		}
-		var body []byte
-		if res.Body != nil {
-			body, err = io.ReadAll(res.Body)
-			res.Body.Close()
-			if err != nil {
-				return util.ErrResponseMsg("Failed to read body: %v", err), nil
+		if !resbodytpl {
+			var body []byte
+			if res.Body != nil {
+				body, err = io.ReadAll(res.Body)
+				res.Body.Close()
+				if err != nil {
+					return util.ErrResponseMsg("Failed to read body: %v", err), nil
+				}
 			}
-		}
-		var data any
-		var dataerr error
-		if body != nil {
-			switch responseBodyType {
-			case "application/json", "text/json", "json":
-				dataerr = json.Unmarshal(body, &data)
-			case "application/yaml", "text/yaml", "yaml":
-				dataerr = yaml.Unmarshal(body, &data)
-			case "application/xml", "text/xml", "xml":
-				dataerr = xml.Unmarshal(body, &data)
-			case "application/toml", "text/toml", "toml":
-				dataerr = toml.Unmarshal(body, &data)
+			var data any
+			if body != nil {
+				switch responseBodyType {
+				case "application/json", "text/json", "json":
+					tplerr = json.Unmarshal(body, &data)
+				case "application/yaml", "text/yaml", "yaml":
+					tplerr = yaml.Unmarshal(body, &data)
+				case "application/xml", "text/xml", "xml":
+					tplerr = xml.Unmarshal(body, &data)
+				case "application/toml", "text/toml", "toml":
+					tplerr = toml.Unmarshal(body, &data)
+				}
 			}
+			response["Body"] = string(body)
+			response["Data"] = data
+		} else {
+			response["Body"] = templateContents
 		}
-		response["body"] = string(body)
-		response["data"] = data
+
 		buf := &bytes.Buffer{}
 		now := time.Now().UTC()
 		err = resBodyTemplate.Execute(buf, map[string]any{
-			"sreq": srcRequest,
-			"req":  request,
-			"res":  response,
-			"err":  dataerr,
-			"now":  now,
+			"Params": queryParams,
+			"SrcReq": srcRequest,
+			"Req":    request,
+			"Res":    response,
+			"Err":    tplerr,
+			"Now":    now,
 		})
 		if err != nil {
 			return util.ErrResponseMsg("Failed to execute response template: %v", err), nil
@@ -749,12 +806,18 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			res.Header.Del("Content-Length")
 			res.Header.Del("Content-Encoding")
 			if responseContentType == "" {
-				res.Header.Set("Content-Type", constants.MIME_HTML)
+				res.Header.Set("Content-Type", constants.MIME_TXT)
+			}
+			if tplStatus > 0 {
+				res.StatusCode = tplStatus
+			}
+			for key := range tplHeader {
+				res.Header.Set(key, tplHeader.Get(key))
 			}
 		}
 	}
 
-	if respass != "" {
+	if respass != "" && res.Body != nil {
 		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		if err != nil {
@@ -933,6 +996,9 @@ func Generate(targetUrl, eid, key, publicurl, prefix string,
 				query := canonicalurlObj.Query()
 				if sign != "" {
 					query.Set(prefix+SIGN_STRING, sign)
+				}
+				if keytype != "" {
+					query.Set(prefix+KEYTYPE_STRING, keytype)
 				}
 				canonicalurlObj.RawQuery = query.Encode()
 				encryptedurl = util.EncryptToString(cipher, []byte(canonicalurlObj.String()))

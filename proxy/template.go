@@ -3,15 +3,43 @@ package proxy
 import (
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"io"
+	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/pelletier/go-toml/v2"
+	"github.com/sagan/simplegoproxy/util"
 	"gopkg.in/yaml.v3"
 )
 
 // template functions
-var templateFuncMap map[string]any
+var templateFuncMap = map[string]any{
+	"btoa":         btoa,
+	"atob":         atob,
+	"upper":        upper,
+	"lower":        lower,
+	"atoi":         atoi,
+	"join":         join,
+	"split":        split,
+	"trim":         trim,
+	"replace":      replaceFunc,
+	"replace_once": replace_once,
+	"trimprefix":   trimprefix,
+	"trimsuffix":   trimsuffix,
+	"json_encode":  json_encode,
+	"json_decode":  json_decode,
+	"yaml_encode":  yaml_encode,
+	"yaml_decode":  yaml_decode,
+}
+
+// privileged template functions, require url be signed.
+var templateAdminFuncMap = map[string]any{
+	"fetch": fetch,
+}
 
 // Base64 decode
 func atob(input any) string {
@@ -138,23 +166,59 @@ func any2string(input any) string {
 	}
 }
 
-func init() {
-	templateFuncMap = map[string]any{
-		"btoa":         btoa,
-		"atob":         atob,
-		"upper":        upper,
-		"lower":        lower,
-		"atoi":         atoi,
-		"join":         join,
-		"split":        split,
-		"trim":         trim,
-		"replace":      replaceFunc,
-		"replace_once": replace_once,
-		"trimprefix":   trimprefix,
-		"trimsuffix":   trimsuffix,
-		"json_encode":  json_encode,
-		"json_decode":  json_decode,
-		"yaml_encode":  yaml_encode,
-		"yaml_decode":  yaml_decode,
+type Response struct {
+	Err    error
+	Status int
+	Header http.Header
+	Body   string
+	Data   any
+}
+
+func fetch(urlStr string, options ...string) *Response {
+	response := &Response{}
+	req, err := http.NewRequest(http.MethodGet, urlStr, nil)
+	if err != nil {
+		response.Err = err
+		return response
 	}
+	methods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions,
+		http.MethodHead}
+	for _, option := range options {
+		switch {
+		case slices.Contains(methods, option):
+			req.Method = option
+		case strings.HasPrefix(option, "@"):
+			req.Body = io.NopCloser(strings.NewReader(option[1:]))
+		case strings.ContainsRune(option, ':'):
+			key, value, _ := strings.Cut(option, ":")
+			req.Header.Add(strings.TrimSpace(key), strings.TrimSpace(value))
+		}
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		response.Err = err
+		return response
+	}
+	response.Header = res.Header
+	response.Status = res.StatusCode
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		response.Err = err
+		return response
+	}
+	response.Body = string(body)
+	var data any
+	switch util.ParseMediaType(res.Header.Get("Content-Type")) {
+	case "application/json", "text/json", "json":
+		err = json.Unmarshal(body, &data)
+	case "application/yaml", "text/yaml", "yaml":
+		err = yaml.Unmarshal(body, &data)
+	case "application/xml", "text/xml", "xml":
+		err = xml.Unmarshal(body, &data)
+	case "application/toml", "text/toml", "toml":
+		err = toml.Unmarshal(body, &data)
+	}
+	response.Data = data
+	response.Err = err
+	return response
 }

@@ -11,6 +11,7 @@ interface InputForm {
   keytype: string;
   body: string;
   resbody: string;
+  resbodytpl: boolean;
   cors: boolean;
   nocsp: boolean;
   fdua: boolean;
@@ -558,6 +559,8 @@ export default function Home({}) {
                   <option value="xml">xml</option>
                   <option value="json">json</option>
                   <option value="yaml">yaml</option>
+                  <option value="js">js</option>
+                  <option value="css">css</option>
                 </select>
               </label>
               <label title="Http authentication to the entrypoint url">
@@ -623,6 +626,14 @@ export default function Home({}) {
                   <option value="13">Full(4)+TextBody(8)+Binary(1) (13)</option>
                   <option value="21">Full(4)+BinBody(16)+Binary(1) (21)</option>
                 </select>
+              </label>
+              <label title="Use target url response body as template">
+                <input
+                  defaultChecked={!!searchParams.get("resbodytpl")}
+                  type="checkbox"
+                  {...register("resbodytpl")}
+                />
+                &nbsp;Resbodytpl
               </label>
             </p>
             <p className="flex">
@@ -901,6 +912,7 @@ export default function Home({}) {
     setValue("respass", values.respass, option);
     setValue("cors", values.cors, option);
     setValue("nocsp", values.nocsp, option);
+    setValue("resbodytpl", values.resbodytpl, option);
     setValue("debug", values.debug, option);
     setValue("keytype", values.keytype, option);
     setValue("addon", values.addon, option);
@@ -1031,6 +1043,7 @@ function NewInputForm(): InputForm {
     nocsp: false,
     fdua: false,
     fdauth: false,
+    resbodytpl: false,
     debug: false,
     addon: "",
     timeout: 0,
