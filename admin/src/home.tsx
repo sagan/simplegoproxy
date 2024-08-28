@@ -283,7 +283,10 @@ export default function Home({}) {
                   return;
                 }
                 value = window.__PREFIX__ + value;
-                if (value.indexOf("=") == -1) {
+                if (
+                  value.indexOf("=") == -1 &&
+                  value[value.length - 1] != "_"
+                ) {
                   value += "=";
                 }
                 let addon = getValues().addon;
@@ -367,6 +370,13 @@ export default function Home({}) {
                     return;
                   }
                   let addon = getValues().addon;
+                  if (
+                    addon.length > 0 &&
+                    addon[addon.length - 1] != "=" &&
+                    addon[addon.length - 1] != "_"
+                  ) {
+                    addon += "=";
+                  }
                   addon += encodeURIComponent(value);
                   setValue("addon", addon);
                 }}

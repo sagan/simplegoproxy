@@ -5,12 +5,14 @@ go 1.22.6
 require (
 	github.com/Noooste/azuretls-client v1.5.4
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
+	github.com/icholy/replace v0.6.0
 	github.com/jxskiss/base62 v1.1.0
 	github.com/pelletier/go-toml/v2 v2.2.2
 	github.com/quantumsheep/range-parser v1.1.0
 	github.com/vincent-petithory/dataurl v1.0.0
 	golang.org/x/crypto v0.26.0
-	gopkg.in/yaml.v2 v2.4.0
+	golang.org/x/text v0.17.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -25,5 +27,4 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	golang.org/x/net v0.28.0 // indirect
 	golang.org/x/sys v0.24.0 // indirect
-	golang.org/x/text v0.17.0 // indirect
 )

@@ -23,9 +23,11 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/icholy/replace"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/vincent-petithory/dataurl"
-	"gopkg.in/yaml.v2"
+	"golang.org/x/text/transform"
+	"gopkg.in/yaml.v3"
 
 	"github.com/sagan/simplegoproxy/constants"
 	"github.com/sagan/simplegoproxy/flags"
@@ -36,6 +38,8 @@ const (
 	HEADER_PREFIX          = "header_"
 	RESPONSE_HEADER_PREFIX = "resheader_"
 	SUB_PREFIX             = "sub_"
+	SUBR_PREFIX            = "subr_"
+	SUBB_PREFIX            = "subb_"
 	CORS_STRING            = "cors"
 	NOCACHE_STRING         = "nocache"
 	NORF_STRING            = "norf"
@@ -252,7 +256,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var err error
 	header := http.Header{}
 	responseHeaders := map[string]string{}
-	subs := map[string]string{}
+	subs := [][2]string{}
+	subrs := [][2]string{}
+	subbs := [][2][]byte{}
 	cors := false
 	insecure := false
 	forcesub := false
@@ -401,7 +407,28 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				} else if strings.HasPrefix(key, SUB_PREFIX) {
 					h := key[len(SUB_PREFIX):]
 					if h != "" {
-						subs[h] = value
+						subs = append(subs, [2]string{h, value})
+					}
+				} else if strings.HasPrefix(key, SUBR_PREFIX) {
+					h := key[len(SUBR_PREFIX):]
+					if h != "" {
+						subrs = append(subrs, [2]string{h, value})
+					}
+				} else if strings.HasPrefix(key, SUBB_PREFIX) {
+					h := key[len(SUBB_PREFIX):]
+					spaceCleaner := strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "")
+					h = spaceCleaner.Replace(h)
+					value = spaceCleaner.Replace(value)
+					needle, err := hex.DecodeString(h)
+					if err != nil {
+						return nil, fmt.Errorf("invalid hexb needle: %v", h)
+					}
+					replace, err := hex.DecodeString(value)
+					if err != nil {
+						return nil, fmt.Errorf("invalid hexb replace: %v", h)
+					}
+					if h != "" {
+						subbs = append(subbs, [2][]byte{needle, replace})
 					}
 				} else {
 					return nil, fmt.Errorf("invalid (non-existent) modification parameter '%s'", key)
@@ -641,6 +668,16 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		res.Header.Set("Content-Type", util.Mime(responseContentType))
 	}
 
+	if (len(subs) > 0 || len(subrs) > 0 || len(subbs) > 0) && res.Body != nil &&
+		(forcesub || util.IsTextualMediaType(util.ParseMediaType(res.Header.Get("Content-Type")))) {
+		res.Body, err = NewReadCloserReplacer(res.Body, subs, subrs, subbs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create body replacer: %v", err)
+		}
+		res.Header.Del("Content-Length")
+		res.Header.Del("Content-Encoding")
+	}
+
 	if resBodyTemplate != nil {
 		var srcRequest = map[string]any{
 			"remote_addr": srcReq.RemoteAddr,
@@ -707,28 +744,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			res.Header.Del("Content-Encoding")
 			if responseContentType == "" {
 				res.Header.Set("Content-Type", constants.MIME_HTML)
-			}
-		}
-	} else if len(subs) > 0 && res.Body != nil {
-		doSub := forcesub
-		if !doSub {
-			if util.IsTextualMediaType(util.ParseMediaType(res.Header.Get("Content-Type"))) {
-				doSub = true
-			}
-		}
-		if doSub {
-			body, err := io.ReadAll(res.Body)
-			res.Body.Close()
-			if err != nil {
-				return util.ErrResponseMsg("Failed to read body: %v", err), nil
-			} else {
-				data := string(body) // for now, assume UTF-8
-				for sub, replace := range subs {
-					data = strings.ReplaceAll(data, sub, replace)
-				}
-				res.Header.Del("Content-Length")
-				res.Header.Del("Content-Encoding")
-				res.Body = io.NopCloser(strings.NewReader(data))
 			}
 		}
 	}
@@ -998,4 +1013,38 @@ func Parse(prefix, fromurl, publicurl string) (plainurl, encryptedEntryurl, entr
 	}
 
 	return plainurl, encryptedEntryurl, entryurl, eid, nil
+}
+
+type ReadCloserReplacer struct {
+	io.Reader
+	src io.Reader
+}
+
+func (r *ReadCloserReplacer) Close() error {
+	if c := r.src.(io.Closer); c != nil {
+		return c.Close()
+	}
+	return nil
+}
+
+// Return a ReadCloser stream that do find-and-replacements to src on the fly.
+// The Close func of returned value is no-op if src ifself is not a Closer.
+func NewReadCloserReplacer(src io.Reader, subs [][2]string, subrs [][2]string,
+	subbs [][2][]byte) (io.ReadCloser, error) {
+	var tt []transform.Transformer
+	for _, sub := range subs {
+		tt = append(tt, replace.String(sub[0], sub[1]))
+	}
+	for _, subr := range subrs {
+		regex, err := regexp.Compile(subr[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile subr rule %v: %v", subr, err)
+		}
+		tt = append(tt, replace.RegexpString(regex, subr[1]))
+	}
+	for _, subb := range subbs {
+		tt = append(tt, replace.Bytes(subb[0], subb[1]))
+	}
+	dst := replace.Chain(src, tt...)
+	return &ReadCloserReplacer{dst, src}, nil
 }
