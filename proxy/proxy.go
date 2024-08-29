@@ -73,9 +73,14 @@ const (
 	AUTHMODE_STRING        = "authmode"
 	RESBODYTPL_STRING      = "resbodytpl" // use response body as template
 	DEBUG_STRING           = "debug"
+	EPATH_STRING           = "epath" // allow subpath in encrypted url
+	SALT_STRING            = "salt"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
 )
+
+// These params do not participate in url signing, sign, keytype, salt.
+var NoSignParameters = []string{SIGN_STRING, KEYTYPE_STRING, SALT_STRING}
 
 type Template interface {
 	Execute(wr io.Writer, data any) error
@@ -98,18 +103,17 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	openNormal, supressError, doLog bool, enableUnix, enableFile, enableRclone, enableCurl, enableExec bool,
 	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD, authenticator *auth.Auth) {
 	defer r.Body.Close()
-	reqUrlQuery := r.URL.Query()
+	srcUrlQuery := r.URL.Query()
+	reqUrlQuery := srcUrlQuery
 	targetUrl := r.URL.EscapedPath()
 	// If in encrypted url mode, the original encrypted url
-	var encryltedUrl = ""
-	if constants.EncryptedUrlRegex.MatchString(targetUrl) {
-		var eid string
-		if i := strings.LastIndex(targetUrl, "_"); i != -1 {
-			eid = targetUrl[:i]
-			targetUrl = targetUrl[i+1:]
-		}
-		encryltedUrl = targetUrl
-		decrypted, err := util.DecryptString(cipher, encryltedUrl)
+	var encryltedUrlPath = ""
+	if submatch := constants.EncryptedUrlRegex.FindStringSubmatch(targetUrl); submatch != nil {
+		eid := submatch[constants.EncryptedUrlRegex.SubexpIndex("eid")]
+		targetUrl = submatch[constants.EncryptedUrlRegex.SubexpIndex("eurl")]
+		epath := submatch[constants.EncryptedUrlRegex.SubexpIndex("epath")]
+		encryltedUrlPath = targetUrl + epath
+		decrypted, err := util.DecryptString(cipher, targetUrl)
 		if err != nil {
 			sendError(w, r, true, doLog, "Invalid encrypted url: %v", err)
 			return
@@ -117,13 +121,36 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		targetUrl = string(decrypted)
 		targetUrlObj, err := url.Parse(targetUrl)
 		if err != nil {
-			sendError(w, r, supressError, doLog, "Invalid decrypted target url: %v", err)
+			sendError(w, r, true, doLog, "Invalid decrypted target url: %v", err)
 			return
 		}
 		reqUrlQuery = targetUrlObj.Query()
 		if qeid := reqUrlQuery.Get(prefix + EID_STRING); qeid != "" && qeid != eid {
-			sendError(w, r, supressError, doLog, "Invalid eid")
+			sendError(w, r, true, doLog, fmt.Sprintf("Invalid eid: qeid=%s, eid=%s", qeid, eid))
 			return
+		}
+		if reqUrlQuery.Has(prefix + EPATH_STRING) {
+			if epath != "" {
+				if escapedEpath, err := url.PathUnescape(epath); err == nil {
+					targetUrlObj.Path = strings.TrimSuffix(targetUrlObj.Path, "/") + escapedEpath
+				} else {
+					targetUrlObj.Path = strings.TrimSuffix(targetUrlObj.Path, "/") + epath
+				}
+			}
+			for key, values := range srcUrlQuery {
+				if !strings.HasPrefix(key, prefix) {
+					for _, value := range values {
+						reqUrlQuery.Add(key, value)
+					}
+				} else if key == prefix+SALT_STRING {
+					reqUrlQuery.Set(key, srcUrlQuery.Get(key))
+				}
+			}
+		} else if epath != "" {
+			sendError(w, r, true, doLog, "epath parameter not set, subpath for encrypted url is not supported")
+			return
+		} else if salt := srcUrlQuery.Get(prefix + SALT_STRING); salt != "" {
+			reqUrlQuery.Set(prefix+SALT_STRING, salt)
 		}
 		targetUrlObj.RawQuery = ""
 		targetUrl = targetUrlObj.String()
@@ -131,7 +158,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 
 	var modparams url.Values
 	// accept "_sgp_a=1/https://ipcfg.io/json" style request url
-	if encryltedUrl == "" && strings.HasPrefix(targetUrl, prefix) {
+	if encryltedUrlPath == "" && strings.HasPrefix(targetUrl, prefix) {
 		index := strings.Index(targetUrl, "/")
 		if index == -1 {
 			sendError(w, r, supressError, doLog, "Invalid url")
@@ -177,47 +204,47 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	if doLog {
 		log.Printf("Fetch: url=%s, params=%v, src=%s", targetUrlObj, queryParams, r.RemoteAddr)
 	}
-	if encryltedUrl == "" && (queryParams.Has(RESPASS_STRING) || queryParams.Has(AUTH_STRING)) {
+	if encryltedUrlPath == "" && (queryParams.Has(RESPASS_STRING) || queryParams.Has(AUTH_STRING)) {
 		sendError(w, r, supressError, doLog, "url with auth or respass must be accessed via encrypted url")
 		return
 	}
 	if strings.HasPrefix(targetUrlObj.Scheme, "curl+") && len(targetUrlObj.Scheme) > 5 {
 		if !enableCurl {
-			sendError(w, r, supressError || encryltedUrl != "", doLog, "curl url is not enabled")
+			sendError(w, r, supressError || encryltedUrlPath != "", doLog, "curl url is not enabled")
 			return
 		}
 	} else {
 		switch targetUrlObj.Scheme {
 		case "unix":
 			if !enableUnix {
-				sendError(w, r, supressError || encryltedUrl != "", doLog, "unix domain socket is not enabled")
+				sendError(w, r, supressError || encryltedUrlPath != "", doLog, "unix domain socket is not enabled")
 				return
 			}
 		case "file":
 			if !enableFile {
-				sendError(w, r, supressError || encryltedUrl != "", doLog, "file url is not enabled")
+				sendError(w, r, supressError || encryltedUrlPath != "", doLog, "file url is not enabled")
 				return
 			}
 		case "rclone":
 			if !enableRclone {
-				sendError(w, r, supressError || encryltedUrl != "", doLog, "rclone url is not enabled")
+				sendError(w, r, supressError || encryltedUrlPath != "", doLog, "rclone url is not enabled")
 				return
 			}
 		case "exec":
 			if !enableExec {
-				sendError(w, r, supressError || encryltedUrl != "", doLog, "exec url is not enabled")
+				sendError(w, r, supressError || encryltedUrlPath != "", doLog, "exec url is not enabled")
 				return
 			}
 		case "http", "https", "data": // do nothing
 		default:
-			sendError(w, r, supressError || encryltedUrl != "", doLog, "unsupported url scheme %q", targetUrlObj.Scheme)
+			sendError(w, r, supressError || encryltedUrlPath != "", doLog, "unsupported url scheme %q", targetUrlObj.Scheme)
 			return
 		}
 	}
 	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key,
-		keytypeBlacklist, openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrl, authenticator, doLog)
+		keytypeBlacklist, openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrlPath, authenticator, doLog)
 	if err != nil {
-		sendError(w, r, supressError || encryltedUrl != "", doLog, "Failed to fetch url: %v", err)
+		sendError(w, r, supressError || encryltedUrlPath != "", doLog, "Failed to fetch url: %v", err)
 		return
 	}
 	if response.Body != nil {
@@ -235,7 +262,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 }
 
 func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, prefix, signkey string, keytypeBlacklist,
-	openScopes []string, openNormal bool, rcloneBinary, rcloneConfig, encryltedUrl string, authenticator *auth.Auth,
+	openScopes []string, openNormal bool, rcloneBinary, rcloneConfig, encryltedUrlPath string, authenticator *auth.Auth,
 	doLog bool) (*http.Response, error) {
 	originalUrlObj := *urlObj
 	isSigned := queryParams.Get(SIGN_STRING) != ""
@@ -290,17 +317,22 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var status = 0
 	keytype := ""
 	sign := ""
+	salt := ""
 	// password to encrypt final response body to client
 	var respass = ""
 	var scopes []string
 	var referers []string
 	var origines []string
 	now := time.Now().Unix()
-	for key, values := range queryParams {
-		value := values[0]
-		if isSigned && key != SIGN_STRING && key != KEYTYPE_STRING {
-			value = applyEnv(value)
+	for key := range queryParams {
+		var values []string
+		values = append(values, queryParams[key]...)
+		if isSigned && !slices.Contains(NoSignParameters, key) {
+			for i := range values {
+				values[i] = applyEnv(values[i])
+			}
 		}
+		value := values[0]
 		switch key {
 		case ENCMODE_STRING:
 			encmode, err = strconv.Atoi(value)
@@ -312,7 +344,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			if err != nil || authmode < 0 {
 				return nil, fmt.Errorf("invalid authmode: %v", err)
 			}
-		case EID_STRING, ARG_SRING, ARGS_SRING:
+		case EID_STRING, EPATH_STRING, ARG_SRING, ARGS_SRING:
 			// do nothing
 		case STATUS_STRING:
 			status, err = strconv.Atoi(value)
@@ -321,6 +353,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			}
 		case RESBODYTPL_STRING:
 			resbodytpl = true
+		case SALT_STRING:
+			salt = value
 		case DEBUG_STRING:
 			debug = true
 		case CORS_STRING:
@@ -509,9 +543,10 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	if isSigned {
 		signUrlQuery := urlObj.Query()
 		for key, values := range queryParams {
-			if key != SIGN_STRING && key != KEYTYPE_STRING {
-				signUrlQuery[prefix+key] = values
-			}
+			signUrlQuery[prefix+key] = values
+		}
+		for _, key := range NoSignParameters {
+			signUrlQuery.Del(prefix + key)
 		}
 		urlObj.RawQuery = signUrlQuery.Encode()
 		signUrl := urlObj.String()
@@ -596,8 +631,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 
-		if isSigned {
-			// only do secret substitution if request signing is enabled
+		if isSigned && len(scopes) == 0 {
+			// Do secret substitution for normal query params if request signing is enabled and is NOT scope signing.
+			// Because scope signing do not protect normal query params.
 			urlQuery := urlObj.Query()
 			for key, values := range urlQuery {
 				for i := range values {
@@ -699,6 +735,13 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	}
 	if nocsp {
 		res.Header.Del("Content-Security-Policy")
+		res.Header.Del("Content-Security-Policy-Report-Only")
+		res.Header.Del("Cross-Origin-Opener-Policy")
+		res.Header.Del("Cross-Origin-Resource-Policy")
+		res.Header.Del("Cross-Origin-Embedder-Policy")
+		res.Header.Del("X-Content-Security-Policy")
+		res.Header.Del("X-WebKit-CSP")
+		res.Header.Del("X-XSS-Protection")
 		res.Header.Del("X-Content-Type-Options")
 		res.Header.Del("X-Frame-Options")
 	}
@@ -817,7 +860,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if err != nil {
 			return nil, fmt.Errorf("failed to read body: %v", err)
 		}
-		cipher, err := util.GetCipher(respass, srcReq.URL.Query().Get("salt"))
+		cipher, err := util.GetCipher(respass, salt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get resbody cipher: %v", err)
 		}
@@ -828,7 +871,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			data = map[string]any{
 				"status":        res.StatusCode,
 				"header":        res.Header,
-				"encrypted_url": encryltedUrl,
+				"encrypted_url": encryltedUrlPath,
 				"request_query": srcReq.URL.RawQuery,
 				"date":          time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 				"source_addr":   srcReq.RemoteAddr,
@@ -942,8 +985,9 @@ func Generate(targetUrl, eid, key, publicurl, prefix string,
 			}
 		}
 		keytype = urlQuery.Get(prefix + KEYTYPE_STRING)
-		urlQuery.Del(prefix + SIGN_STRING)
-		urlQuery.Del(prefix + KEYTYPE_STRING)
+		for _, key := range NoSignParameters {
+			urlQuery.Del(prefix + key)
+		}
 		urlObj.RawQuery = urlQuery.Encode() // query key sorted
 		canonicalurl = urlObj.String()
 		if urlObj.Scheme != "data" && urlQuery[prefix+SCOPE_STRING] != nil {
@@ -1003,6 +1047,9 @@ func Generate(targetUrl, eid, key, publicurl, prefix string,
 				if eid != "" {
 					encryptedurl = eid + "_" + encryptedurl
 				}
+				if query.Has(prefix + EPATH_STRING) {
+					encryptedurl += "/"
+				}
 				encryptedEntryurl = strings.TrimSuffix(publicurl, "/") + "/" + encryptedurl
 			}
 		}
@@ -1014,17 +1061,12 @@ func Generate(targetUrl, eid, key, publicurl, prefix string,
 
 func Parse(prefix, fromurl, publicurl string) (plainurl, encryptedEntryurl, entryurl, eid string, err error) {
 	fromurl = strings.TrimPrefix(fromurl, publicurl)
-	if constants.EncryptedUrlRegex.MatchString(fromurl) {
+	if submatch := constants.EncryptedUrlRegex.FindStringSubmatch(fromurl); submatch != nil {
 		if flags.Cipher == nil {
 			return "", "", "", "", fmt.Errorf("key is empty")
 		}
-		var ciphertext string
-		if i := strings.LastIndex(fromurl, "_"); i != -1 {
-			eid = fromurl[:i]
-			ciphertext = fromurl[i+1:]
-		} else {
-			ciphertext = fromurl
-		}
+		eid := submatch[constants.EncryptedUrlRegex.SubexpIndex("eid")]
+		ciphertext := submatch[constants.EncryptedUrlRegex.SubexpIndex("eurl")]
 		plaindata, err := util.DecryptString(flags.Cipher, ciphertext)
 		if err != nil {
 			return "", "", "", "", err
@@ -1062,18 +1104,16 @@ func Parse(prefix, fromurl, publicurl string) (plainurl, encryptedEntryurl, entr
 			targetUrlObj.Scheme = "https"
 		}
 		targetUrlQuery := targetUrlObj.Query()
-		targetUrlQuery.Del(prefix + SIGN_STRING)
-		targetUrlQuery.Del(prefix + KEYTYPE_STRING)
 		for key, values := range modparams {
 			if !strings.HasPrefix(key, prefix) {
 				return "", "", "", "", fmt.Errorf("invalid url")
 			}
-			if key == prefix+SIGN_STRING || key == prefix+KEYTYPE_STRING {
-				continue
-			}
 			for _, value := range values {
 				targetUrlQuery.Add(key, value)
 			}
+		}
+		for _, key := range NoSignParameters {
+			targetUrlQuery.Del(key)
 		}
 		targetUrlObj.RawQuery = targetUrlQuery.Encode()
 		plainurl = targetUrlObj.String()

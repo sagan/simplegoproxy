@@ -14,7 +14,7 @@ const LINE_BREAKS = "\r\n"
 const INFINITE_TIMEOUT = 86400 * 365 * 100
 
 // match with a encrypted url base62 string
-var EncryptedUrlRegex = regexp.MustCompile(`^([_a-zA-Z0-9]+?_)?[a-zA-Z0-9]{18,}$`)
+var EncryptedUrlRegex = regexp.MustCompile(`^((?P<eid>[_a-zA-Z0-9]+?)_)?(?P<eurl>[a-zA-Z0-9]{18,})(?P<epath>/.*)?$`)
 
 // textual metiatypes besides "text/*
 var TextualMediatypes = []string{

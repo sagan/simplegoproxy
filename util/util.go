@@ -771,6 +771,8 @@ func CreateUrlPatternMatcher(pattern string) func(string) bool {
 		str += parts["host"]
 	}
 	if parts["path"] == "" || parts["path"] == "/" {
+		str += "/?"
+	} else if parts["path"] == "/*" { // "/*" matches with any path
 		str += "(/.*)?"
 	} else {
 		str += regexp.MustCompile(`\\\*`).ReplaceAllString(regexp.QuoteMeta(parts["path"]), ".*")

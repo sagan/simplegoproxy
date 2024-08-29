@@ -57,6 +57,8 @@ Command-line flag arguments:
 ```
   -addr string
         Http listening addr, e.g. "127.0.0.1:8380" or ":8380". If not set, will listen on "0.0.0.0:8380" (default "0.0.0.0:8380")
+  -basic-auth
+        Make admin UI use http basic authentication. If not set, it uses Digest authentication (more secure)
   -cors
         Set "Access-Control-Allow-Origin: *" header for admin API
   -curl-binary string
@@ -176,11 +178,13 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_keytype=<value>` : The sign key type. See below "Signing key type" section.
 - `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
 - `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
+- `_sgp_epath` : (Value ignored) Enabl plaintext subpath and normal query variables for encrypted url.
 - `_sgp_status=<value>` : Force set http response status code sent back to client. E.g. `200`, `403`. Special values: `-1` - Use original http response code.
 - `_sgp_auth=user:pass` : The auth username & password for request to the Simplegoproxy server. See below "Request authentication" section.
 - `_sgp_authmode=1` : The request authentication mode. See below "Request authentication" section.
 - `_sgp_respass=<value>` : The password to encrypt the response. See below "Response encrpytion" section.
 - `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
+- `_sgp_salt=<value>` : The response encryption key salt.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
 - `_sgp_validbefore=<value>`, `_sgp_validafter=<value>` : If set, the entrypoint url can only be used before or after this time accordingly. Value can be any of below time formats: `2006-01-02`, `2006-01-02T15:04:05` `2006-01-02T15:04:05-07:00`, `2006-01-02T15:04:05Z`. All but the last format are parsed in local timezone. The last one are parsed as UTC time. Note to enforce these restrictions, "Request signing" must be enabled.
@@ -369,14 +373,17 @@ It's also possible to make some urls do not require signing, see below "Open sco
 
 ### Admin UI Authorization
 
-If request signing is enabled, the admin UI will require http basic authorization:
+If request signing is enabled (key is set), the admin UI will require [http authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication):
 
 - Username: Default is `root`. Can be changed by `-user string` flag.
 - Password: Default use "key" flag as password. Use `-pass string` flag to set standalone password.
+- Authentication type: Default is "digest auth". Use `-basic-auth` flag to change to "basic auth" (less secure but much more easy to use programmatically).
 
 ### Env substitutions
 
-If the entrypoint url is signed, all `__SGPENV_**__` style substrings in modification parameter value or normal query variable value will be replaced with the value of the corresponding `**` environment variable, if it exists, when sending request to the target url. E.g. `__SGPENV_PATH__` will be replaced by `PATH` env value.
+If the entrypoint url is signed, all `__SGPENV_**__` style substrings in modification parameter value will be replaced with the value of the corresponding `**` environment variable, if it exists, when sending request to the target url. E.g. `__SGPENV_PATH__` will be replaced by `PATH` env value.
+
+If current url is not scope-signed (no `_sgp_scope` parameter is set), Env substitutions will also apply to the normal query variable values.
 
 The substitutions occur after the url sign verification.
 
@@ -464,6 +471,8 @@ It's possible to prepand a fixed `eid` (encrypted url id) string to the beginnin
 
 The target urls are encrypted using "key" flag value as the cryptographic key. If you change the key, all previously generated entrypoint urls will be inaccessible.
 
+If the `_sgp_epath` parameter is set, the encrypted url can also take a suffix of subpath and / or normal query variables. For example, if `http://localhost:8380/aabbccddeeff` is the encrypted entrypoint url of `http://example.com/test/`, then `http://localhost:8380/aabbccddeeff/subpath?foo=bar` can be used to access `http://example.com/test/subpath?foo=bar`. Note you also need to set the `_sgp_scope` (scope signing) parameter to sign the whole scope urls, or it will not work.
+
 ### Request authentication
 
 If the `_sgp_auth=uass:pass` parameter is set, the request to the entrypoint url will require http access authentication using specified username & password.
@@ -494,7 +503,7 @@ The `_sgp_encmode` (encryption mode, default to 0) is a bitwise flags integer th
 - bit 3 (`8`) : Used with bit 2 set. Force json "body" field to be original http rersonse string.
 - bit 4 (`16`) : Used with bit 2 set. Force json "body" field to be base64 string of original http rersonse.
 
-Additionally, if the request client sent has the `salt` query variable, it will be used as the salt in PBKDF2 key derivation.
+Additionally, if the request client sent has the `_sgp_salt` parameter, it will be used as the salt in PBKDF2 key derivation.
 
 To decrypt the `X-Encrpytion-Meta` header and / or the encrypted response body, see below examples.
 

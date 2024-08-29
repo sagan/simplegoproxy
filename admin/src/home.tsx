@@ -8,6 +8,7 @@ import { generatePassword } from "./funcs.js";
 interface InputForm {
   url: string;
   eid: string;
+  epath: boolean;
   keytype: string;
   body: string;
   resbody: string;
@@ -144,7 +145,7 @@ export default function Home({}) {
           >
             <span>Eid:&nbsp;</span>
             <input
-              className={errors.eid ? "error" : ""}
+              className={`${errors.eid ? "error" : ""} w-16`}
               defaultValue=""
               type="search"
               {...register("eid", { pattern: /^[_a-zA-Z0-9]*$/ })}
@@ -161,6 +162,14 @@ export default function Home({}) {
               }}
             />
             <span>🔒&nbsp;Encrypt</span>
+          </label>
+          <label title="Allow encrypted url to have plaintext subpath and query variables">
+            <input
+              defaultChecked={!!searchParams.get("epath")}
+              type="checkbox"
+              {...register("epath")}
+            />
+            &nbsp;Epath
           </label>
           <button type="submit">Generate</button>
           <button
@@ -927,6 +936,7 @@ export default function Home({}) {
     setValue("restype", values.restype, option);
     setValue("status", values.status, option);
     setValue("eid", values.eid, option);
+    setValue("epath", values.epath, option);
     setValue("impersonate", values.impersonate, option);
     setSearchParams(serializeInputForm(getValues(), encrypt));
   }
@@ -1055,6 +1065,7 @@ function NewInputForm(): InputForm {
     fdmethod: false,
     fdbody: false,
     fdtype: false,
+    epath: false,
     method: "",
     auth: "",
     respass: "",

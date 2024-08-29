@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sagan/simplegoproxy/auth"
 	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/proxy"
 	"github.com/sagan/simplegoproxy/util"
@@ -51,18 +52,9 @@ var GetHttpHandle = func() http.Handler {
 		return s
 	})
 	indexHtml = []byte(indexHtmlStr)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("WWW-Authenticate", `Basic realm="website"`)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if flags.Cors {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-		}
-		if flags.Pass != "" {
-			username, password, ok := r.BasicAuth()
-			if !ok || username != flags.User || password != flags.Pass {
-				w.WriteHeader(401)
-				w.Write([]byte("Unauthorized"))
-				return
-			}
 		}
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		f, err := root.Open(path)
@@ -79,6 +71,11 @@ var GetHttpHandle = func() http.Handler {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+	if flags.Pass != "" {
+		authenticator := auth.NewAuthenticator("website", false)
+		handler = authenticator.Wrap(handler, flags.User, flags.Pass, flags.BasicAuth)
+	}
+	return handler
 }
 
 var apiHandler = func(w http.ResponseWriter, r *http.Request) {

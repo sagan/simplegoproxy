@@ -15,6 +15,7 @@ var (
 	Log                 bool
 	Encrypt             bool
 	Cors                bool
+	BasicAuth           bool
 	EnableUnix          bool
 	EnableFile          bool
 	EnableRclone        bool
@@ -69,6 +70,8 @@ func init() {
 	flag.BoolVar(&EnableAll, "enable-all", false, `Enable all schemes url: unix & file & rclone & curl & exec`)
 	flag.BoolVar(&OpenNormal, "open-normal", false, `Used with request signing, make all "http(s)" and "data" urls do not require signing`)
 	flag.BoolVar(&Cors, "cors", false, `Set "Access-Control-Allow-Origin: *" header for admin API`)
+	flag.BoolVar(&BasicAuth, "basic-auth", false,
+		`Make admin UI use http basic authentication. If not set, it uses Digest authentication (more secure)`)
 	flag.BoolVar(&Sign, "sign", false,
 		`Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)`)
 	flag.StringVar(&Eid, "eid", "",

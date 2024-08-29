@@ -119,7 +119,7 @@ func main() {
 	}
 
 	adminPath := flags.Rootpath + "admin/"
-	fmt.Printf("simplegoproxy %s starts on %s, rootpath=%s, prefix=%s, signing_enabled=%t\n",
+	fmt.Printf("simplegoproxy %s starts on %s, rootpath=%s, prefix=%s, signing_enabled(key_set)=%t\n",
 		version.Version, flags.Addr, flags.Rootpath, flags.Prefix, flags.Key != "")
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
 	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t, curl=%t, exec=%t\n",

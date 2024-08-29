@@ -108,6 +108,22 @@ func (c digestCache) Swap(i, j int) {
 	c[i], c[j] = c[j], c[i]
 }
 
+func (a *Auth) Wrap(wrapped http.HandlerFunc, user, pass string, basic bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if errres, err := a.CheckAuth(r, user, pass, basic); err != nil {
+			for key, values := range errres.Header {
+				for _, value := range values {
+					w.Header().Add(key, value)
+				}
+			}
+			w.WriteHeader(errres.StatusCode)
+			io.Copy(w, errres.Body)
+		} else {
+			wrapped(w, r)
+		}
+	}
+}
+
 // Purge removes count oldest entries from DigestAuth.clients
 func (a *Auth) Purge(count int) {
 	a.mutex.Lock()
