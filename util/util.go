@@ -10,10 +10,12 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -31,9 +33,11 @@ import (
 	"github.com/Noooste/azuretls-client"
 	"github.com/google/shlex"
 	"github.com/jxskiss/base62"
+	"github.com/pelletier/go-toml/v2"
 	range_parser "github.com/quantumsheep/range-parser"
 	"github.com/sagan/simplegoproxy/constants"
 	"golang.org/x/crypto/pbkdf2"
+	"gopkg.in/yaml.v3"
 )
 
 type NetRequest struct {
@@ -1060,16 +1064,29 @@ func EncryptToBase64String(cipher cipher.AEAD, plaindata []byte) (cipherstring s
 	return base64.StdEncoding.EncodeToString(Encrypt(cipher, plaindata))
 }
 
-// ciphertext should be the result of EncryptToString
-func Decrypt(cipher cipher.AEAD, ciphertext string) (plaindata []byte, err error) {
+func Decrypt(cipher cipher.AEAD, cipherdata []byte) (plaindata []byte, err error) {
+	if len(cipherdata) <= cipher.NonceSize() {
+		return nil, fmt.Errorf("ciperdata too small")
+	}
+	return cipher.Open(nil, cipherdata[:cipher.NonceSize()], cipherdata[cipher.NonceSize():], nil)
+}
+
+// ciphertext should be the result of EncryptToBase64String
+func DecryptBase64String(cipher cipher.AEAD, ciphertext string) (plaindata []byte, err error) {
+	cipherdata, err := base64.StdEncoding.DecodeString(ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	return Decrypt(cipher, cipherdata)
+}
+
+// ciphertext (base62 string) should be the result of EncryptToString
+func DecryptString(cipher cipher.AEAD, ciphertext string) (plaindata []byte, err error) {
 	cipherdata, err := base62.DecodeString(ciphertext)
 	if err != nil {
 		return nil, err
 	}
-	if len(cipherdata) < cipher.NonceSize()+16 {
-		return nil, fmt.Errorf("ciperdata too small")
-	}
-	return cipher.Open(nil, cipherdata[:cipher.NonceSize()], cipherdata[cipher.NonceSize():], nil)
+	return Decrypt(cipher, cipherdata)
 }
 
 // Get a cipher from passphrase and salt
@@ -1086,6 +1103,7 @@ func GetCipher(passphrase string, salt string) (cipher.AEAD, error) {
 }
 
 // Parse http content-type header and return mediatype, e.g. "text/html".
+// contentType: the http Content-Type header, e.g. "text/html; charset=utf-8"
 func ParseMediaType(contentType string) string {
 	if contentType != "" {
 		if mediatype, _, err := mime.ParseMediaType(contentType); err == nil {
@@ -1098,4 +1116,75 @@ func ParseMediaType(contentType string) string {
 func IsTextualMediaType(mediatype string) bool {
 	return mediatype != "" &&
 		(strings.HasPrefix(mediatype, "text/") || slices.Index(constants.TextualMediatypes, mediatype) != -1)
+}
+
+// Unmarshal a json / yaml / toml / xml string according to contentType.
+// contentType could be: a mediatype (e.g. "application/json"), or a file type (e.g. "json").
+// If contentType is empty or is not a supported type, return nil, nil.
+func Unmarshal(contentType string, input io.Reader) (data any, err error) {
+	body, err := io.ReadAll(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read input: %v", err)
+	}
+	if strings.ContainsRune(contentType, '/') {
+		contentType = ParseMediaType(contentType)
+	}
+	if len(body) > 0 {
+		switch contentType {
+		case "application/json", "text/json", "json":
+			err = json.Unmarshal(body, &data)
+		case "application/yaml", "text/yaml", "yaml":
+			err = yaml.Unmarshal(body, &data)
+		case "application/xml", "text/xml", "xml":
+			err = xml.Unmarshal(body, &data)
+		case "application/toml", "text/toml", "toml":
+			err = toml.Unmarshal(body, &data)
+		}
+	}
+	return data, err
+}
+
+func Marshal(contentType string, input any) (data []byte, err error) {
+	if strings.ContainsRune(contentType, '/') {
+		contentType = ParseMediaType(contentType)
+	}
+	switch contentType {
+	case "application/json", "text/json", "json":
+		data, err = json.Marshal(input)
+	case "application/yaml", "text/yaml", "yaml":
+		data, err = yaml.Marshal(input)
+	case "application/xml", "text/xml", "xml":
+		data, err = xml.Marshal(input)
+	case "application/toml", "text/toml", "toml":
+		data, err = toml.Marshal(input)
+	}
+	return data, err
+}
+
+// Return a cryptographically secure random string of format /[a-zA-Z0-9]{length}/
+func RandString(length int) string {
+	if length <= 0 {
+		return ""
+	}
+	const rand_chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	var sb strings.Builder
+	var max byte = byte(math.Floor(float64(math.MaxUint8/len(rand_chars))) * float64(len(rand_chars)))
+	buf := make([]byte, length)
+outer:
+	for {
+		if _, err := rand.Read(buf); err != nil {
+			panic("rand.Read() failed")
+		}
+		for _, byte := range buf {
+			// By taking only the numbers up to a multiple of char space size and discarding others,
+			// we expect a uniform distribution of all possible chars.
+			if byte < max {
+				sb.WriteByte(rand_chars[int(byte)%len(rand_chars)])
+			}
+			if sb.Len() >= length {
+				break outer
+			}
+		}
+	}
+	return sb.String()
 }

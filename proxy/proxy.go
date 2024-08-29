@@ -8,12 +8,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	htmlTemplate "html/template"
 	"io"
 	"log"
-	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,11 +22,10 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/Masterminds/sprig/v3"
 	"github.com/icholy/replace"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/vincent-petithory/dataurl"
 	"golang.org/x/text/transform"
-	"gopkg.in/yaml.v3"
 
 	"github.com/sagan/simplegoproxy/auth"
 	"github.com/sagan/simplegoproxy/constants"
@@ -112,7 +109,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 			targetUrl = targetUrl[i+1:]
 		}
 		encryltedUrl = targetUrl
-		decrypted, err := util.Decrypt(cipher, encryltedUrl)
+		decrypted, err := util.DecryptString(cipher, encryltedUrl)
 		if err != nil {
 			sendError(w, r, true, doLog, "Invalid encrypted url: %v", err)
 			return
@@ -370,6 +367,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		case RESBODYTYPE_STRING:
 			responseBodyType = value
 		case KEYTYPE_STRING:
+			if strings.ContainsAny(value, constants.LINE_BREAKS) {
+				return nil, fmt.Errorf("keytype can not contain line breaks")
+			}
 			keytype = value
 		case SCOPE_STRING:
 			for _, value := range values {
@@ -455,42 +455,51 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
 	}
-
+	var getTemplate func(contents string) (tpl Template, err error)
 	var tplStatus int
 	var tplHeader http.Header
-	var tplFuncs template.FuncMap
 	if templateContents != "" || resbodytpl {
 		tplStatus = 0
 		tplHeader = http.Header{}
-		// dummy side effect template funcs to update request-scope state
-		tplFuncs = template.FuncMap{
-			"set_status": func(input any) string {
-				tplStatus, _ = strconv.Atoi(any2string(input))
-				return ""
-			},
-			"set_header": func(key, value any) string {
-				keyStr := any2string(key)
-				valueStr := any2string(value)
-				if valueStr == "" {
-					tplHeader.Del(keyStr)
+		getTemplate = func(contents string) (tpl Template, err error) {
+			// dummy side effect template funcs to update request-scope state
+			funcs := template.FuncMap{
+				"set_status": func(input any) string {
+					tplStatus, _ = strconv.Atoi(any2string(input))
+					return ""
+				},
+				"set_header": func(key, value any) string {
+					keyStr := any2string(key)
+					valueStr := any2string(value)
+					if valueStr == "" {
+						tplHeader.Del(keyStr)
+					} else {
+						tplHeader.Set(keyStr, valueStr)
+					}
+					return ""
+				},
+			}
+			if responseContentType == "html" {
+				if isSigned {
+					tpl, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
+						Parse(contents)
 				} else {
-					tplHeader.Set(keyStr, valueStr)
+					tpl, err = htmlTemplate.New("template").Funcs(funcs).Parse(contents)
 				}
-				return ""
-			},
-		}
-		maps.Copy(tplFuncs, templateFuncMap)
-		if isSigned {
-			maps.Copy(tplFuncs, templateAdminFuncMap)
+			} else {
+				if isSigned {
+					tpl, err = template.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
+						Parse(contents)
+				} else {
+					tpl, err = template.New("template").Funcs(funcs).Parse(contents)
+				}
+			}
+			return tpl, err
 		}
 	}
+
 	if templateContents != "" && !resbodytpl {
-		if responseContentType == "html" {
-			resBodyTemplate, err = htmlTemplate.New("template").Funcs(tplFuncs).Parse(templateContents)
-		} else {
-			resBodyTemplate, err = template.New("template").Funcs(tplFuncs).Parse(templateContents)
-		}
-		if err != nil {
+		if resBodyTemplate, err = getTemplate(templateContents); err != nil {
 			return nil, fmt.Errorf("invalid template: %v", err)
 		}
 	}
@@ -725,12 +734,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if err != nil {
 			return util.ErrResponseMsg("Failed to read body: %v", err), nil
 		}
-		if responseContentType == "html" {
-			resBodyTemplate, err = htmlTemplate.New("template").Funcs(tplFuncs).Parse(string(body))
-		} else {
-			resBodyTemplate, err = template.New("template").Funcs(tplFuncs).Parse(string(body))
-		}
-		if err != nil {
+		if resBodyTemplate, err = getTemplate(string(body)); err != nil {
 			return nil, fmt.Errorf("invalid bodytpl template: %v", err)
 		}
 	}
@@ -758,6 +762,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if responseBodyType == "" && originalResponseContentType != "" {
 			responseBodyType = util.ParseMediaType(originalResponseContentType)
 		}
+		var data any
 		if !resbodytpl {
 			var body []byte
 			if res.Body != nil {
@@ -766,25 +771,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				if err != nil {
 					return util.ErrResponseMsg("Failed to read body: %v", err), nil
 				}
-			}
-			var data any
-			if body != nil {
-				switch responseBodyType {
-				case "application/json", "text/json", "json":
-					tplerr = json.Unmarshal(body, &data)
-				case "application/yaml", "text/yaml", "yaml":
-					tplerr = yaml.Unmarshal(body, &data)
-				case "application/xml", "text/xml", "xml":
-					tplerr = xml.Unmarshal(body, &data)
-				case "application/toml", "text/toml", "toml":
-					tplerr = toml.Unmarshal(body, &data)
-				}
+				data, tplerr = util.Unmarshal(responseBodyType, bytes.NewReader(body))
 			}
 			response["Body"] = string(body)
-			response["Data"] = data
 		} else {
 			response["Body"] = templateContents
+			data, tplerr = util.Unmarshal(responseBodyType, strings.NewReader(templateContents))
 		}
+		response["Data"] = data
 
 		buf := &bytes.Buffer{}
 		now := time.Now().UTC()
@@ -908,9 +902,13 @@ func applyEnv(str string) string {
 	})
 }
 
+// key and keytype are guaranteed to do not contain \n.
+// Put keytype (plaintext) first, to increase security against length extension attack.
+// See https://en.wikipedia.org/wiki/Length_extension_attack .
+// We use HMAC to derive signing key from Realkey() output, so it's only a double security.
 func Realkey(key, keytype string) string {
 	if keytype != "" {
-		key += "." + keytype
+		key = keytype + "\n" + key
 	}
 	return key
 }
@@ -1027,7 +1025,7 @@ func Parse(prefix, fromurl, publicurl string) (plainurl, encryptedEntryurl, entr
 		} else {
 			ciphertext = fromurl
 		}
-		plaindata, err := util.Decrypt(flags.Cipher, ciphertext)
+		plaindata, err := util.DecryptString(flags.Cipher, ciphertext)
 		if err != nil {
 			return "", "", "", "", err
 		}

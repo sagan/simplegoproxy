@@ -6,9 +6,7 @@ package auth
 import (
 	"bytes"
 	"crypto/md5"
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sagan/simplegoproxy/util"
 )
 
 var errUnauthorized = fmt.Errorf("unauthorized")
@@ -144,7 +144,7 @@ func (a *Auth) requireAuth(basic bool) *http.Response {
 	if clientsLen > a.ClientCacheSize+a.ClientCacheTolerance {
 		a.Purge(a.ClientCacheTolerance * 2)
 	}
-	nonce := RandomKey()
+	nonce := util.RandString(32)
 	a.clients[nonce] = &digestClient{nc: 0, lastSeen: time.Now().UnixNano()}
 
 	return &http.Response{
@@ -274,7 +274,7 @@ func NewAuthenticator(realm string, proxy bool) *Auth {
 		headers = NormalHeaders
 	}
 	return &Auth{
-		Opaque:               RandomKey(),
+		Opaque:               util.RandString(32),
 		Realm:                realm,
 		PlainTextSecrets:     false,
 		ClientCacheSize:      DefaultClientCacheSize,
@@ -282,19 +282,6 @@ func NewAuthenticator(realm string, proxy bool) *Auth {
 		clients:              map[string]*digestClient{},
 		Headers:              headers,
 	}
-}
-
-// RandomKey returns a random 16-byte base64 alphabet string
-func RandomKey() string {
-	k := make([]byte, 12)
-	for bytes := 0; bytes < len(k); {
-		n, err := rand.Read(k[bytes:])
-		if err != nil {
-			panic("rand.Read() failed")
-		}
-		bytes += n
-	}
-	return base64.StdEncoding.EncodeToString(k)
 }
 
 // ParseList parses a comma-separated list of values as described by

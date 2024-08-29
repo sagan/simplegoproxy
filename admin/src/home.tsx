@@ -36,6 +36,7 @@ interface InputForm {
 }
 
 const URL_LENGTH_LIMIT = 2048;
+const PASS_LEN = 32;
 
 export default function Home({}) {
   const {
@@ -576,7 +577,7 @@ export default function Home({}) {
                   onClick={() => {
                     let auth = getValues().auth.trim();
                     let [user] = auth.split(":");
-                    auth = (user || "user") + ":" + generatePassword();
+                    auth = (user || "user") + ":" + generatePassword(PASS_LEN);
                     setValue("auth", auth);
                   }}
                 >
@@ -606,7 +607,7 @@ export default function Home({}) {
                   type="button"
                   title="Generate a random encryption password"
                   onClick={() => {
-                    setValue("respass", generatePassword());
+                    setValue("respass", generatePassword(PASS_LEN));
                   }}
                 >
                   🎲

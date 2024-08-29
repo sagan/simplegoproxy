@@ -8,6 +8,8 @@ const DEFAULT_MIME = "application/octet-stream"
 const MIME_TXT = "text/plain; charset=utf-8"
 const MIME_HTML = "text/html; charset=utf-8"
 
+const LINE_BREAKS = "\r\n"
+
 // seconds of 1 years, aka: infinite.
 const INFINITE_TIMEOUT = 86400 * 365 * 100
 

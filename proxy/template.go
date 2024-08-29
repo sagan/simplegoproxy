@@ -1,9 +1,8 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/base64"
-	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,34 +10,23 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
 	"github.com/sagan/simplegoproxy/util"
-	"gopkg.in/yaml.v3"
 )
 
-// template functions
+// Additional template functions, require url to be signed.
+// Due to the pipeline way that Go template works, the last argument of funcs shoud be the primary one.
 var templateFuncMap = map[string]any{
-	"btoa":         btoa,
-	"atob":         atob,
-	"upper":        upper,
-	"lower":        lower,
-	"atoi":         atoi,
-	"join":         join,
-	"split":        split,
-	"trim":         trim,
-	"replace":      replaceFunc,
-	"replace_once": replace_once,
-	"trimprefix":   trimprefix,
-	"trimsuffix":   trimsuffix,
-	"json_encode":  json_encode,
-	"json_decode":  json_decode,
-	"yaml_encode":  yaml_encode,
-	"yaml_decode":  yaml_decode,
-}
-
-// privileged template functions, require url be signed.
-var templateAdminFuncMap = map[string]any{
-	"fetch": fetch,
+	"btoa":           btoa,
+	"atob":           atob,
+	"marshal":        marshal,
+	"unmarshal":      unmarshal,
+	"randstring":     randstring,
+	"encrypt":        encrypt,
+	"decrypt":        decrypt,
+	"decrypt_binary": decrypt_binary,
+	"neg":            neg,
+	"abs":            absFunc,
+	"fetch":          fetch,
 }
 
 // Base64 decode
@@ -52,18 +40,18 @@ func btoa(input any) string {
 	return base64.StdEncoding.EncodeToString([]byte(any2string(input)))
 }
 
-// string to upper
-func upper(input any) string {
-	return strings.ToUpper(any2string(input))
-}
-
-// string to lower
-func lower(input any) string {
-	return strings.ToLower(any2string(input))
-}
-
 // Convert input to int. if failed to parse input as int, return 0.
 func atoi(input any) int {
+	if input != nil {
+		switch v := input.(type) {
+		case int:
+			return v
+		case int64:
+			return int(v)
+		case float64:
+			return int(v)
+		}
+	}
 	i, err := strconv.Atoi(any2string(input))
 	if err != nil {
 		return 0
@@ -71,81 +59,30 @@ func atoi(input any) int {
 	return i
 }
 
-// string to upper
-func join(input []any, deli any) string {
-	str := ""
-	deliStr := any2string(deli)
-	for i, el := range input {
-		if i > 0 {
-			str += deliStr
-		}
-		str += any2string(el)
-	}
-	return str
+func unmarshal(contentType any, input any) any {
+	data, _ := util.Unmarshal(any2string(contentType), strings.NewReader(any2string(input)))
+	return data
 }
 
-// Split input to slice separated by deli.
-// If input is empty string, return nil.
-func split(input any, deli any) []string {
-	str := any2string(input)
-	if str == "" {
+func marshal(contentType any, input any) string {
+	data, _ := util.Marshal(any2string(contentType), input)
+	return string(data)
+}
+
+// If input is a string or []byte, return as it.
+// Otherwise return nil.
+func any2byteslice(input any) []byte {
+	if input == nil {
 		return nil
 	}
-	return strings.Split(str, any2string(deli))
-}
-
-func trim(input any) string {
-	return strings.TrimSpace(any2string(input))
-}
-
-func trimprefix(input any, prefix any) string {
-	return strings.TrimPrefix(any2string(input), any2string(prefix))
-}
-
-func trimsuffix(input any, suffix any) string {
-	return strings.TrimSuffix(any2string(input), any2string(suffix))
-}
-
-func json_encode(input any) string {
-	output, err := json.Marshal(input)
-	if err != nil {
-		return ""
-	}
-	return string(output)
-}
-
-func json_decode(input any) any {
-	var output any
-	err := json.Unmarshal([]byte(any2string(input)), &output)
-	if err != nil {
+	switch value := input.(type) {
+	case string:
+		return []byte(value)
+	case []byte:
+		return value
+	default:
 		return nil
 	}
-	return &output
-}
-
-func yaml_encode(input any) string {
-	output, err := yaml.Marshal(input)
-	if err != nil {
-		return ""
-	}
-	return string(output)
-}
-
-func yaml_decode(input any) any {
-	var output any
-	err := yaml.Unmarshal([]byte(any2string(input)), &output)
-	if err != nil {
-		return nil
-	}
-	return &output
-}
-
-func replaceFunc(input, old, new any) string {
-	return strings.ReplaceAll(any2string(input), any2string(old), any2string(new))
-}
-
-func replace_once(input, old, new any) string {
-	return strings.Replace(any2string(input), any2string(old), any2string(new), 1)
 }
 
 // Convert input to string.
@@ -176,6 +113,13 @@ type Response struct {
 
 func fetch(urlStr string, options ...string) *Response {
 	response := &Response{}
+	if urlStr == "" {
+		response.Err = fmt.Errorf("no url")
+		return response
+	}
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		urlStr = "https://" + urlStr
+	}
 	req, err := http.NewRequest(http.MethodGet, urlStr, nil)
 	if err != nil {
 		response.Err = err
@@ -207,18 +151,62 @@ func fetch(urlStr string, options ...string) *Response {
 		return response
 	}
 	response.Body = string(body)
-	var data any
-	switch util.ParseMediaType(res.Header.Get("Content-Type")) {
-	case "application/json", "text/json", "json":
-		err = json.Unmarshal(body, &data)
-	case "application/yaml", "text/yaml", "yaml":
-		err = yaml.Unmarshal(body, &data)
-	case "application/xml", "text/xml", "xml":
-		err = xml.Unmarshal(body, &data)
-	case "application/toml", "text/toml", "toml":
-		err = toml.Unmarshal(body, &data)
-	}
+	data, err := util.Unmarshal(res.Header.Get("Content-Type"), bytes.NewReader(body))
 	response.Data = data
 	response.Err = err
 	return response
+}
+
+// Encrypt data to base64 string
+func encrypt(password, salt, data any) string {
+	// if password
+	cipher, err := util.GetCipher(any2string(password), any2string(salt))
+	if err != nil {
+		return ""
+	}
+	return util.EncryptToBase64String(cipher, []byte(any2string(data)))
+}
+
+// Decrypt base64 data string
+func decrypt(password, salt, data any) string {
+	// if password
+	cipher, err := util.GetCipher(any2string(password), any2string(salt))
+	if err != nil {
+		return ""
+	}
+	plaintext, err := util.DecryptBase64String(cipher, any2string(data))
+	if err != nil {
+		return ""
+	}
+	return string(plaintext)
+}
+
+// Decrypt binary data
+func decrypt_binary(password, salt, data any) string {
+	cipher, err := util.GetCipher(any2string(password), any2string(salt))
+	if err != nil {
+		return ""
+	}
+	plaintext, err := util.Decrypt(cipher, any2byteslice(data))
+	if err != nil {
+		return ""
+	}
+	return string(plaintext)
+}
+
+// Get a cryptographically secure random string of "[0-9a-zA-Z]{length}".
+func randstring(length any) string {
+	return util.RandString(atoi(length))
+}
+
+func neg(a any) int {
+	return -atoi(a)
+}
+
+func absFunc(a any) int {
+	v := atoi(a)
+	if v < 0 {
+		return -v
+	}
+	return v
 }

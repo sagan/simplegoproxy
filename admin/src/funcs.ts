@@ -12,14 +12,16 @@ export function format_date(ts: number): string {
 }
 
 /**
- * Generate a cryptographically strong password of format /[a-zA-Z0-9]{32}/
+ * Generate a cryptographically strong password of format /[a-zA-Z0-9]{length}/
  */
-export function generatePassword() {
+export function generatePassword(length: number) {
+  if (length <= 0) {
+    return "";
+  }
   let chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  let pwordLength = 32;
   let password = "";
   let max = Math.floor(65535 / chars.length) * chars.length;
-  const array = new Uint16Array(pwordLength * 2);
+  const array = new Uint16Array(length * 2);
   while (true) {
     crypto.getRandomValues(array);
     for (let i = 0; i < array.length; i++) {
@@ -29,7 +31,7 @@ export function generatePassword() {
         password += chars[array[i] % chars.length];
       }
     }
-    if (password.length >= pwordLength) {
+    if (password.length >= length) {
       break;
     }
   }

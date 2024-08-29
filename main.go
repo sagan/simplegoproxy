@@ -51,6 +51,11 @@ func main() {
 	if flags.Key == "" && (flags.OpenNormal || len(flags.OpenScopes) > 0) {
 		log.Fatalf(`The "open-normal" and "open-scope" flags must be used with "key" flag`)
 	}
+	// key may be concated with request keytype by "\n" sep.
+	// As a security prevention, forbit  "\n" in key and keytype.
+	if strings.ContainsAny(flags.Key, constants.LINE_BREAKS) {
+		log.Fatalf(`The "key" flag can not contains line breaks`)
+	}
 	if !strings.HasPrefix(flags.Rootpath, "/") {
 		flags.Rootpath = "/" + flags.Rootpath
 	}

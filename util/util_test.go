@@ -111,7 +111,7 @@ func TestEncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get decrypt cipher: %v", err)
 	}
-	decryptedData, err := Decrypt(decryptCipher, cipherstring)
+	decryptedData, err := DecryptString(decryptCipher, cipherstring)
 	if err != nil {
 		t.Fatalf("Failed to decrypt: %v", err)
 	}

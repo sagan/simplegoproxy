@@ -258,9 +258,11 @@ Notes:
 - The status of rendered response is `200` by default, use `_sgp_status` parameter to override it.
 - The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
 - If `_sgp_restype` is set to "html", the template renderring will use Go [html/template](https://pkg.go.dev/html/template); otherwise it will use Go [text/template](https://pkg.go.dev/text/template).
-- Some pre-defined functions are available in template, such as `atob` and `btoa`, which do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob). For details, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
-- If current entrypoint url is signed, some powerful have-side-effect functions will be available in templates:
+- If current entrypoint url is signed, some pre-defined functions are available in template:
+  - `atob` and `btoa`, Do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob).
   - `fetch(url, options...)` : Do a arbitary http request, return `{Err, Status, Header, Body, Data}`, where `Body` is response string and `Data` is response body parsed data object. The `options` args is an string array which elements could be any of: http method (e.g. `GET`), http header (e.g. `Content-Type: text/plain`), http request body (starts with `@`, e.g. `@a=1&b=2`).
+  - For full func list, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
+  - Plus with all functions from Go [Sprig](https://github.com/Masterminds/sprig) library.
 - Some special functions can be used in templates to change the response status code and / or header. These functions always return empty string.
   - `set_status(status)` : Set response status code.
   - `set_header(key, value)` : Set a response header. If value is empty string, delete the header instead.
