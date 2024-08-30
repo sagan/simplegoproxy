@@ -12,7 +12,7 @@ interface InputForm {
   keytype: string;
   body: string;
   resbody: string;
-  resbodytpl: boolean;
+  resbodytpl: string;
   cors: boolean;
   nocsp: boolean;
   fdua: boolean;
@@ -346,13 +346,14 @@ export default function Home({}) {
               >
                 validafter
               </option>
+              <option value="resbodytpl">resbodytpl</option>
               <option title="proxy=socks5://1.2.3.4:1080" value="proxy">
                 proxy
               </option>
               <option value="scope=">scope</option>
               <option value="scope=*://*/*">scope=*</option>
               <option title="Set no-cache header on response" value="nocache=1">
-                nocache
+                nocache=1
               </option>
               <option
                 title="Trim most response headers except Content-Type/Length/Encoding/Range"
@@ -511,6 +512,7 @@ export default function Home({}) {
               <label title="Target url http request basic auth user">
                 <span>User:&nbsp;</span>
                 <input
+                  className="w-16"
                   placeholder="user:pass"
                   defaultValue={searchParams.get("user") || ""}
                   {...register("user")}
@@ -564,6 +566,7 @@ export default function Home({}) {
                   {...register("restype")}
                 >
                   <option value="">(Default)</option>
+                  <option value="*">* (auto)</option>
                   <option value="txt">txt</option>
                   <option value="html">html</option>
                   <option value="xml">xml</option>
@@ -577,6 +580,7 @@ export default function Home({}) {
                 <span>Auth:&nbsp;🪪</span>
                 <input
                   placeholder="user:pass"
+                  className="w-16"
                   defaultValue={searchParams.get("auth") || ""}
                   {...register("auth")}
                 />
@@ -628,22 +632,27 @@ export default function Home({}) {
                   <option value="0">(Default encryption mode) (0)</option>
                   <option value="1">binary response (1)</option>
                   <option value="2">body only encryption (2)</option>
-                  <option value="3">Binary(1)+BodyOnly(2) (3)</option>
+                  <option value="3">Binary(1)+BodyOnly(2)</option>
                   <option value="4">full protection (4)</option>
-                  <option value="5">Full(4)+Binary(1) (5)</option>
-                  <option value="12">Full(4)+TextBody(8) (12)</option>
-                  <option value="20">Full(4)+BinBody(16) (20)</option>
-                  <option value="13">Full(4)+TextBody(8)+Binary(1) (13)</option>
-                  <option value="21">Full(4)+BinBody(16)+Binary(1) (21)</option>
+                  <option value="5">Full(4)+Binary(1)</option>
+                  <option value="12">Full(4)+TextBody(8)</option>
+                  <option value="20">Full(4)+BinBody(16)</option>
+                  <option value="13">Full(4)+TextBody(8)+Binary(1)</option>
+                  <option value="21">Full(4)+BinBody(16)+Binary(1)</option>
                 </select>
               </label>
-              <label title="Use target url response body as template">
-                <input
-                  defaultChecked={!!searchParams.get("resbodytpl")}
-                  type="checkbox"
+              <label title="Treat target url response body as template if url path has this suffix">
+                Resbodytpl:&nbsp;
+                <select
+                  defaultValue={searchParams.get("resbodytpl") || ""}
                   {...register("resbodytpl")}
-                />
-                &nbsp;Resbodytpl
+                >
+                  <option value="">(None)</option>
+                  <option value="*">*</option>
+                  <option value=".tmpl">.tmpl</option>
+                  <option value=".gotmpl">.gotmpl</option>
+                  <option value=".gohtml">.gohtml</option>
+                </select>
               </label>
             </p>
             <p className="flex">
@@ -1050,11 +1059,11 @@ function NewInputForm(): InputForm {
     keytype: "",
     body: "",
     resbody: "",
+    resbodytpl: "",
     cors: false,
     nocsp: false,
     fdua: false,
     fdauth: false,
-    resbodytpl: false,
     debug: false,
     addon: "",
     timeout: 0,

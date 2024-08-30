@@ -161,12 +161,15 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_subb_<HexString>=<replacement>` : Similar to `_spg_sub_*` but do binary bytes find and replacement.
 - `_sgp_forcesub` : (Value ignored) Force do response body substitutions on any MIME type response.
 - `_sgp_cookie=<value>` : Set request cookie. Equivalent to `_sgp_header_cookie=<value>`.
-- `_sgp_type=<value>` : Set the request content type. Equivalent to `_sgp_header_Content-Type=<value>`. If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
-- `_sgp_restype=<value>` : Set the response content type. Equivalent to `_sgp_resheader_Content-Type=<value>`. Additionally, `_sgp_type` and `_sgp_restype` also accept file extension values like `txt` or `html`, in which case it will use the MIME type associated with the file extension ext; it's also the recommended way to set these two parameters.
+- `_sgp_type=<value>` : Set the request content type. Similar to `_sgp_header_Content-Type=<value>`.
+- `_sgp_restype=<value>` : Set the response content type. Similar to `_sgp_resheader_Content-Type=<value>`.
+  - If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
+  - The `_sgp_type` and `_sgp_restype` parameters also accept file extension values like `txt` or `html`, in which case it will use the MIME type associated with the file extension ext; it's also the recommended way to set these two parameters.
+  - If `_sgp_restype` is set to `*`, it will automatically guess the value from the suffix of current target url path, e.g. `https://example.com/foo.txt` will set response content-type to `text/plain`.
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_resbody=<value>` : Set the response body template.
 - `_sgp_resbodytype=<value>` : The original response body type, e.g. `json`, `xml`, `yaml`, `toml`.
-- `_sgp_resbodytpl` : (Value ignored) Use original response body as template string.
+- `_sgp_resbodytpl` : Treat target url response body as template string, if the url path ends with this value (suffix). Can be set multiple times. E.g. `.gohtml`. Set to `*` to always treat target url response body as template string.
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. By default some headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`. Some values have special meanings:
   - `*`: ALL request headers.
   - `%0A` (\n) : Supresses default forwarding headers and makes sure no headers would be forwarded.
@@ -271,7 +274,7 @@ Notes:
   - `set_status(status)` : Set response status code.
   - `set_header(key, value)` : Set a response header. If value is empty string, delete the header instead.
 
-One more thing, if `_sgp_resbodytpl` parameter is set, Simplegoproxy will treat the original response body of target url server as the template string, renderring it using the above context; The `_sgp_resbody` will serve as `Res.Body` context variable instead in this case.
+One more thing, if `_sgp_resbodytpl=.gohtml` parameter is set, Simplegoproxy will use the original response body of target url as the template string if the url's path ends with this value `.gohtml`, renderring it using the above context; If `_sgp_resbodytpl` is set to `*`, it always use target url response body as template. The `_sgp_resbody` will instead serve as `Res.Body` context variable in this case.
 
 Template example:
 

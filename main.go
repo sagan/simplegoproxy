@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"regexp"
@@ -17,6 +18,12 @@ import (
 	"github.com/sagan/simplegoproxy/util"
 	"github.com/sagan/simplegoproxy/version"
 )
+
+func init() {
+	mime.AddExtensionType(".toml", "application/toml")
+	mime.AddExtensionType(".gotmpl", "text/plain")
+	mime.AddExtensionType(".gohtml", "text/html")
+}
 
 func main() {
 	var err error

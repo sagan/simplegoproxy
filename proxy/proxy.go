@@ -71,7 +71,7 @@ const (
 	STATUS_STRING          = "status"
 	ENCMODE_STRING         = "encmode"
 	AUTHMODE_STRING        = "authmode"
-	RESBODYTPL_STRING      = "resbodytpl" // use response body as template
+	RESBODYTPL_STRING      = "resbodytpl" // use response body as template. path suffix, e.g. ".sgp.txt"
 	DEBUG_STRING           = "debug"
 	EPATH_STRING           = "epath" // allow subpath in encrypted url
 	SALT_STRING            = "salt"
@@ -295,7 +295,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	nocache := false
 	norf := false // no redirect following
 	debug := false
-	resbodytpl := false
+	useresbodytpl := false
 	proxy := ""
 	impersonate := ""
 	timeout := int64(0)
@@ -311,6 +311,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var resBodyTemplate Template
 	contentType := ""
 	responseContentType := ""
+	responseMediaType := ""
 	responseBodyType := ""
 	method := http.MethodGet
 	// -1 : force use original http response status
@@ -352,7 +353,16 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				return nil, fmt.Errorf("invalid status %q: %v", value, err)
 			}
 		case RESBODYTPL_STRING:
-			resbodytpl = true
+			if value == "*" {
+				useresbodytpl = true
+			} else {
+				for _, value := range values {
+					if value != "" && strings.HasSuffix(urlObj.Path, value) {
+						useresbodytpl = true
+						break
+					}
+				}
+			}
 		case SALT_STRING:
 			salt = value
 		case DEBUG_STRING:
@@ -397,7 +407,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		case TYPE_STRING:
 			contentType = value
 		case RESTYPE_STRING:
-			responseContentType = value
+			if value != "" {
+				if value == "*" { // guess from url path
+					responseContentType = util.FileContentType(urlObj.Path)
+				} else {
+					responseContentType = util.ContentType(value)
+				}
+				responseMediaType = util.MediaType(responseContentType)
+			}
 		case RESBODYTYPE_STRING:
 			responseBodyType = value
 		case KEYTYPE_STRING:
@@ -489,10 +506,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
 	}
+
 	var getTemplate func(contents string) (tpl Template, err error)
 	var tplStatus int
 	var tplHeader http.Header
-	if templateContents != "" || resbodytpl {
+	if templateContents != "" || useresbodytpl {
 		tplStatus = 0
 		tplHeader = http.Header{}
 		getTemplate = func(contents string) (tpl Template, err error) {
@@ -513,7 +531,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 					return ""
 				},
 			}
-			if responseContentType == "html" {
+			if responseMediaType == constants.MEDIATYPE_HTML {
 				if isSigned {
 					tpl, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
 						Parse(contents)
@@ -532,7 +550,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 	}
 
-	if templateContents != "" && !resbodytpl {
+	if templateContents != "" && !useresbodytpl {
 		if resBodyTemplate, err = getTemplate(templateContents); err != nil {
 			return nil, fmt.Errorf("invalid template: %v", err)
 		}
@@ -594,7 +612,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user)))
 		}
 		if contentType != "" {
-			header.Set("Content-Type", util.Mime(contentType))
+			header.Set("Content-Type", util.ContentType(contentType))
 		}
 		forwardHeaders := []string{"If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
 			"If-Unmodified-Since", "Range"}
@@ -757,11 +775,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 	}
 	if responseContentType != "" {
-		res.Header.Set("Content-Type", util.Mime(responseContentType))
+		res.Header.Set("Content-Type", responseContentType)
 	}
 
 	if (len(subs) > 0 || len(subrs) > 0 || len(subbs) > 0) && res.Body != nil &&
-		(forcesub || util.IsTextualMediaType(util.ParseMediaType(res.Header.Get("Content-Type")))) {
+		(forcesub || util.IsTextualMediaType(util.MediaType(res.Header.Get("Content-Type")))) {
 		res.Body, err = NewReadCloserReplacer(res.Body, subs, subrs, subbs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create body replacer: %v", err)
@@ -770,7 +788,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		res.Header.Del("Content-Encoding")
 	}
 
-	if resbodytpl && res.Body != nil {
+	if useresbodytpl && res.Body != nil {
 		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		res.Body = nil
@@ -803,10 +821,10 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			"Header": res.Header,
 		}
 		if responseBodyType == "" && originalResponseContentType != "" {
-			responseBodyType = util.ParseMediaType(originalResponseContentType)
+			responseBodyType = util.MediaType(originalResponseContentType)
 		}
 		var data any
-		if !resbodytpl {
+		if !useresbodytpl {
 			var body []byte
 			if res.Body != nil {
 				body, err = io.ReadAll(res.Body)
@@ -864,7 +882,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if err != nil {
 			return nil, fmt.Errorf("failed to get resbody cipher: %v", err)
 		}
-		mediaType := util.ParseMediaType(res.Header.Get("Content-Type"))
+		mediaType := util.MediaType(res.Header.Get("Content-Type"))
 		var data map[string]any
 		protectHeaders := encmode&4 != 0 || encmode&2 == 0
 		if protectHeaders {

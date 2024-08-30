@@ -855,10 +855,10 @@ func FileContentType(path string) string {
 	return contentType
 }
 
-// Get mime from str. str could be:
-// already a mime (do nothing);
+// Get "Conten-Type" value from str. str could be:
+// already a mediatype or content-type (do nothing);
 // or a file ext (with or without leading dot) or file name.
-func Mime(str string) string {
+func ContentType(str string) string {
 	if !strings.Contains(str, `/`) {
 		if !strings.Contains(str, ".") {
 			str = "." + str
@@ -1106,7 +1106,7 @@ func GetCipher(passphrase string, salt string) (cipher.AEAD, error) {
 
 // Parse http content-type header and return mediatype, e.g. "text/html".
 // contentType: the http Content-Type header, e.g. "text/html; charset=utf-8"
-func ParseMediaType(contentType string) string {
+func MediaType(contentType string) string {
 	if contentType != "" {
 		if mediatype, _, err := mime.ParseMediaType(contentType); err == nil {
 			return mediatype
@@ -1129,7 +1129,7 @@ func Unmarshal(contentType string, input io.Reader) (data any, err error) {
 		return nil, fmt.Errorf("failed to read input: %v", err)
 	}
 	if strings.ContainsRune(contentType, '/') {
-		contentType = ParseMediaType(contentType)
+		contentType = MediaType(contentType)
 	}
 	if len(body) > 0 {
 		switch contentType {
@@ -1148,7 +1148,7 @@ func Unmarshal(contentType string, input io.Reader) (data any, err error) {
 
 func Marshal(contentType string, input any) (data []byte, err error) {
 	if strings.ContainsRune(contentType, '/') {
-		contentType = ParseMediaType(contentType)
+		contentType = MediaType(contentType)
 	}
 	switch contentType {
 	case "application/json", "text/json", "json":
