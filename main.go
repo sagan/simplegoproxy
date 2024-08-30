@@ -21,6 +21,7 @@ import (
 
 func init() {
 	mime.AddExtensionType(".toml", "application/toml")
+	mime.AddExtensionType(".yaml", "application/yaml")
 	mime.AddExtensionType(".gotmpl", "text/plain")
 	mime.AddExtensionType(".gohtml", "text/html")
 }

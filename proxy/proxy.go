@@ -71,6 +71,7 @@ const (
 	STATUS_STRING          = "status"
 	ENCMODE_STRING         = "encmode"
 	AUTHMODE_STRING        = "authmode"
+	TPLMODE_STRING         = "tplmode"
 	RESBODYTPL_STRING      = "resbodytpl" // use response body as template. path suffix, e.g. ".sgp.txt"
 	DEBUG_STRING           = "debug"
 	EPATH_STRING           = "epath" // allow subpath in encrypted url
@@ -299,6 +300,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	proxy := ""
 	impersonate := ""
 	timeout := int64(0)
+	tplmode := 0
 	encmode := 0
 	authmode := 0
 	cookie := ""
@@ -335,6 +337,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 		value := values[0]
 		switch key {
+		case TPLMODE_STRING:
+			tplmode, err = strconv.Atoi(value)
+			if err != nil || tplmode < 0 {
+				return nil, fmt.Errorf("invalid tplmode: %v", err)
+			}
 		case ENCMODE_STRING:
 			encmode, err = strconv.Atoi(value)
 			if err != nil || encmode < 0 {
@@ -353,14 +360,10 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				return nil, fmt.Errorf("invalid status %q: %v", value, err)
 			}
 		case RESBODYTPL_STRING:
-			if value == "*" {
-				useresbodytpl = true
-			} else {
-				for _, value := range values {
-					if value != "" && strings.HasSuffix(urlObj.Path, value) {
-						useresbodytpl = true
-						break
-					}
+			for _, value := range values {
+				if value != "" && strings.HasSuffix(urlObj.Path, value) {
+					useresbodytpl = true
+					break
 				}
 			}
 		case SALT_STRING:
@@ -409,7 +412,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		case RESTYPE_STRING:
 			if value != "" {
 				if value == "*" { // guess from url path
-					responseContentType = util.FileContentType(urlObj.Path)
+					if strings.HasSuffix(urlObj.Path, "/") {
+						responseContentType = constants.MIME_HTML
+					} else {
+						responseContentType = util.FileContentType(urlObj.Path)
+					}
 				} else {
 					responseContentType = util.ContentType(value)
 				}
@@ -506,6 +513,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
 	}
+	if tplmode&2 == 1 {
+		useresbodytpl = true
+	}
 
 	var getTemplate func(contents string) (tpl Template, err error)
 	var tplStatus int
@@ -531,7 +541,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 					return ""
 				},
 			}
-			if responseMediaType == constants.MEDIATYPE_HTML {
+			if responseMediaType == constants.MEDIATYPE_HTML && tplmode&1 == 0 {
 				if isSigned {
 					tpl, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
 						Parse(contents)

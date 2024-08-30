@@ -165,11 +165,11 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_restype=<value>` : Set the response content type. Similar to `_sgp_resheader_Content-Type=<value>`.
   - If `_sgp_method` is set to `POST` and `_sgp_body` is also set, the `_sgp_type` will have a default value `application/x-www-form-urlencoded`.
   - The `_sgp_type` and `_sgp_restype` parameters also accept file extension values like `txt` or `html`, in which case it will use the MIME type associated with the file extension ext; it's also the recommended way to set these two parameters.
-  - If `_sgp_restype` is set to `*`, it will automatically guess the value from the suffix of current target url path, e.g. `https://example.com/foo.txt` will set response content-type to `text/plain`.
+  - If `_sgp_restype` is set to `*`, it will automatically guess the value from the suffix of current target url path, e.g. `https://example.com/foo.txt` will set response content-type to `text/plain`; if the url path ends with `/`, it will set response content type to `text/html`.
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_resbody=<value>` : Set the response body template.
 - `_sgp_resbodytype=<value>` : The original response body type, e.g. `json`, `xml`, `yaml`, `toml`.
-- `_sgp_resbodytpl` : Treat target url response body as template string, if the url path ends with this value (suffix). Can be set multiple times. E.g. `.gohtml`. Set to `*` to always treat target url response body as template string.
+- `_sgp_resbodytpl` : Treat target url response body as template string, if the url path ends with this value (suffix). Can be set multiple times. E.g. `.gohtml`.
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. By default some headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`. Some values have special meanings:
   - `*`: ALL request headers.
   - `%0A` (\n) : Supresses default forwarding headers and makes sure no headers would be forwarded.
@@ -187,6 +187,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_authmode=1` : The request authentication mode. See below "Request authentication" section.
 - `_sgp_respass=<value>` : The password to encrypt the response. See below "Response encrpytion" section.
 - `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
+- `_sgp_tplmode=1` : The response template mode, bitwise flags integer. See below "Response template" section.
 - `_sgp_salt=<value>` : The response encryption key salt.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
@@ -274,7 +275,12 @@ Notes:
   - `set_status(status)` : Set response status code.
   - `set_header(key, value)` : Set a response header. If value is empty string, delete the header instead.
 
-One more thing, if `_sgp_resbodytpl=.gohtml` parameter is set, Simplegoproxy will use the original response body of target url as the template string if the url's path ends with this value `.gohtml`, renderring it using the above context; If `_sgp_resbodytpl` is set to `*`, it always use target url response body as template. The `_sgp_resbody` will instead serve as `Res.Body` context variable in this case.
+One more thing, if any `_sgp_resbodytpl=.gohtml` parameter is set, Simplegoproxy will use the original response body of target url as the template string if the url's path ends with this value `.gohtml`, renderring it using the above context. The `_sgp_resbody` will instead serve as `Res.Body` context variable in this case.
+
+The `_sgp_tplmode` (template mode, default to 0) is a bitwise flags integer parameter that can control several response template behaviors:
+
+- bit 0 (`& 1`): Always uses text template, never uses html template..
+- bit 1 (`& 2`) : Always use target url response body as template.
 
 Template example:
 
@@ -482,7 +488,7 @@ If the `_sgp_auth=uass:pass` parameter is set, the request to the entrypoint url
 
 Note only the encrpyted form entrypoint url can be used if the `_sgp_auth` parameter is set.
 
-By default it uses [basic access authentication](https://en.wikipedia.org/wiki/Basic_access_authentication). If `_sgp_authmode` (bitwise flags integer) is set to `1`, it will use [digest access authentication](https://en.wikipedia.org/wiki/Digest_access_authentication).
+By default it uses [basic access authentication](https://en.wikipedia.org/wiki/Basic_access_authentication). If `_sgp_authmode` (bitwise flags integer) parameter is set to `1`, it will use [digest access authentication](https://en.wikipedia.org/wiki/Digest_access_authentication).
 
 ### Response encrpytion
 
@@ -498,13 +504,13 @@ By default, the http response will always has `200` status with only three http 
 - `request_query` : (string) The original http request query string that Simplegoproxy server received.
 - `source_addr` : (string) The source addr of original http request that Simplegoproxy server received. E.g. `192.168.1.1:56789`.
 
-The `_sgp_encmode` (encryption mode, default to 0) is a bitwise flags integer that can control several encryption behaviors:
+The `_sgp_encmode` (encryption mode, default to 0) is a bitwise flags integer parameter that can control several encryption behaviors:
 
-- bit 0 (`1`): Make the response body be binary data instead of base64 string.
-- bit 1 (`2`) : Make only response body be encrypted: response header not protected.
-- bit 2 (`4`) : Make the response body be encrypted data of the a JSON object which has the same structure as above `X-Encryption-Meta` header, plus some additional fields: `body`, `body_encoding`. The `body_encoding` indicates the encoding method of `body`, possibly values: empty string, `base64`.
-- bit 3 (`8`) : Used with bit 2 set. Force json "body" field to be original http rersonse string.
-- bit 4 (`16`) : Used with bit 2 set. Force json "body" field to be base64 string of original http rersonse.
+- bit 0 (`& 1`): Make the response body be binary data instead of base64 string.
+- bit 1 (`& 2`) : Make only response body be encrypted: response header not protected.
+- bit 2 (`& 4`) : Make the response body be encrypted data of the a JSON object which has the same structure as above `X-Encryption-Meta` header, plus some additional fields: `body`, `body_encoding`. The `body_encoding` indicates the encoding method of `body`, possibly values: empty string, `base64`.
+- bit 3 (`& 8`) : Used with bit 2 set. Force json "body" field to be original http rersonse string.
+- bit 4 (`& 16`) : Used with bit 2 set. Force json "body" field to be base64 string of original http rersonse.
 
 Additionally, if the request client sent has the `_sgp_salt` parameter, it will be used as the salt in PBKDF2 key derivation.
 

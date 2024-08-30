@@ -12,7 +12,6 @@ interface InputForm {
   keytype: string;
   body: string;
   resbody: string;
-  resbodytpl: string;
   cors: boolean;
   nocsp: boolean;
   fdua: boolean;
@@ -32,6 +31,7 @@ interface InputForm {
   status: number;
   encmode: number;
   authmode: number;
+  tplmode: number;
   timeout: number;
   validtime: number;
 }
@@ -69,6 +69,7 @@ export default function Home({}) {
     !!searchParams.get("status") ||
     !!searchParams.get("auth") ||
     !!searchParams.get("respass") ||
+    !!searchParams.get("tplmode") ||
     !!searchParams.get("encmode") ||
     !!searchParams.get("authmode") ||
     !!searchParams.get("resbody") ||
@@ -346,7 +347,12 @@ export default function Home({}) {
               >
                 validafter
               </option>
-              <option value="resbodytpl">resbodytpl</option>
+              <option
+                value="resbodytpl"
+                title="Treat target url response body as template string if the url path ends with this value (suffix)"
+              >
+                resbodytpl
+              </option>
               <option title="proxy=socks5://1.2.3.4:1080" value="proxy">
                 proxy
               </option>
@@ -405,7 +411,7 @@ export default function Home({}) {
                 title="Add env value"
                 type="button"
                 onClick={() => {
-                  let value = (prompt("Input env value") || "").trim();
+                  let value = (prompt("Input env variable name") || "").trim();
                   if (!value) {
                     return;
                   }
@@ -550,7 +556,12 @@ export default function Home({}) {
                   {...register("status", { valueAsNumber: true })}
                 >
                   <option value="0">(Default)</option>
-                  <option value="-1">Use Original</option>
+                  <option
+                    value="-1"
+                    title="Always use original target url http response status"
+                  >
+                    Original
+                  </option>
                   <option value="200">200</option>
                   <option value="401">401</option>
                   <option value="403">403</option>
@@ -566,7 +577,12 @@ export default function Home({}) {
                   {...register("restype")}
                 >
                   <option value="">(Default)</option>
-                  <option value="*">* (auto)</option>
+                  <option
+                    value="*"
+                    title="Automatically guess response content-type from current url path suffix"
+                  >
+                    * (auto)
+                  </option>
                   <option value="txt">txt</option>
                   <option value="html">html</option>
                   <option value="xml">xml</option>
@@ -641,17 +657,26 @@ export default function Home({}) {
                   <option value="21">Full(4)+BinBody(16)+Binary(1)</option>
                 </select>
               </label>
-              <label title="Treat target url response body as template if url path has this suffix">
-                Resbodytpl:&nbsp;
+              <label title="Response template mode">
+                Tplmode&nbsp;
                 <select
-                  defaultValue={searchParams.get("resbodytpl") || ""}
-                  {...register("resbodytpl")}
+                  defaultValue={parseInt(searchParams.get("tplmode")) || 0}
+                  {...register("tplmode", { valueAsNumber: true })}
                 >
-                  <option value="">(None)</option>
-                  <option value="*">*</option>
-                  <option value=".tmpl">.tmpl</option>
-                  <option value=".gotmpl">.gotmpl</option>
-                  <option value=".gohtml">.gohtml</option>
+                  <option value="0">(None)</option>
+                  <option
+                    value="1"
+                    title="Always use text template (never use html template)"
+                  >
+                    Text template (1)
+                  </option>
+                  <option
+                    value="2"
+                    title="Always use target url response body as template"
+                  >
+                    Res Body Tpl (2)
+                  </option>
+                  <option value="3">Text(1)+BodyTpl(2)</option>
                 </select>
               </label>
             </p>
@@ -931,12 +956,12 @@ export default function Home({}) {
     setValue("respass", values.respass, option);
     setValue("cors", values.cors, option);
     setValue("nocsp", values.nocsp, option);
-    setValue("resbodytpl", values.resbodytpl, option);
     setValue("debug", values.debug, option);
     setValue("keytype", values.keytype, option);
     setValue("addon", values.addon, option);
     setValue("timeout", values.timeout, option);
     setValue("validtime", values.validtime, option);
+    setValue("tplmode", values.tplmode, option);
     setValue("encmode", values.encmode, option);
     setValue("authmode", values.authmode, option);
     setValue("body", values.body, option);
@@ -1059,7 +1084,6 @@ function NewInputForm(): InputForm {
     keytype: "",
     body: "",
     resbody: "",
-    resbodytpl: "",
     cors: false,
     nocsp: false,
     fdua: false,
@@ -1070,6 +1094,7 @@ function NewInputForm(): InputForm {
     status: 0,
     encmode: 0,
     authmode: 0,
+    tplmode: 0,
     validtime: 0,
     fdmethod: false,
     fdbody: false,
