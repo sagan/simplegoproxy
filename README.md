@@ -265,17 +265,26 @@ Notes:
 - The `res.data` is by default parsed according to original http response's content-type header. You can forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
 - The status of rendered response is `200` by default, use `_sgp_status` parameter to override it.
 - The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
+- If any `_sgp_resbodytpl=.gohtml` parameter is set, Simplegoproxy will use the original response body of target url as the template string if the url's path ends with this value `.gohtml`, renderring it using the above context. The `_sgp_resbody` will instead serve as `Res.Body` context variable in this case.
 - If `_sgp_restype` is set to "html", the template renderring will use Go [html/template](https://pkg.go.dev/html/template); otherwise it will use Go [text/template](https://pkg.go.dev/text/template).
-- If current entrypoint url is signed, some pre-defined functions are available in template:
-  - `atob` and `btoa`, Do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob).
-  - `fetch(url, options...)` : Do a arbitary http request, return `{Err, Status, Header, Body, Data}`, where `Body` is response string and `Data` is response body parsed data object. The `options` args is an string array which elements could be any of: http method (e.g. `GET`), http header (e.g. `Content-Type: text/plain`), http request body (starts with `@`, e.g. `@a=1&b=2`).
-  - For full func list, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
-  - Plus with all functions from Go [Sprig](https://github.com/Masterminds/sprig) library.
 - Some special functions can be used in templates to change the response status code and / or header. These functions always return empty string.
   - `set_status(status)` : Set response status code.
   - `set_header(key, value)` : Set a response header. If value is empty string, delete the header instead.
+  - `set_body(body)` : Instead of using template renderring output, use `body` as the response body. `body` could be any type of `string`, `[]byte`, `io.ReadCloser` or `io.Reader`.
 
-One more thing, if any `_sgp_resbodytpl=.gohtml` parameter is set, Simplegoproxy will use the original response body of target url as the template string if the url's path ends with this value `.gohtml`, renderring it using the above context. The `_sgp_resbody` will instead serve as `Res.Body` context variable in this case.
+If current entrypoint url is signed, some more pre-defined functions are available in template:
+
+- `atob` and `btoa`, Do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob).
+- `fetch(url, options...)` : Do a arbitary http request, return `{Err, Status, Header, RawBody, Body, Data}`.
+  - The `options` args is an string array which elements could be any of:
+    - http method: e.g. `GET`.
+    - http header: e.g. `Content-Type: text/plain`.
+    - http request body: starts with `@`, e.g. `@a=1&b=2`.
+    - `NOBODY` : special flag, do not read and parse response body.
+  - `Body`, `Data`: The response body string and parsed data object. Set when `NOBODY` is not set.
+  - `RawBody`: The raw response body (`io.ReadCloser`). Set when `NOBODY` is set.
+- For full func list, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
+- Plus with all functions from Go [Sprig](https://github.com/Masterminds/sprig) library.
 
 The `_sgp_tplmode` (template mode, default to 0) is a bitwise flags integer parameter that can control several response template behaviors:
 

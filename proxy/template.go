@@ -13,6 +13,8 @@ import (
 	"github.com/sagan/simplegoproxy/util"
 )
 
+const NOBODY = "NOBODY"
+
 // Additional template functions, require url to be signed.
 // Due to the pipeline way that Go template works, the last argument of funcs shoud be the primary one.
 var templateFuncMap = map[string]any{
@@ -23,6 +25,7 @@ var templateFuncMap = map[string]any{
 	"randstring":     randstring,
 	"encrypt":        encrypt,
 	"decrypt":        decrypt,
+	"encrypt_binary": encrypt_binary,
 	"decrypt_binary": decrypt_binary,
 	"neg":            neg,
 	"abs":            absFunc,
@@ -104,11 +107,12 @@ func any2string(input any) string {
 }
 
 type Response struct {
-	Err    error
-	Status int
-	Header http.Header
-	Body   string
-	Data   any
+	Err     error
+	Status  int
+	Header  http.Header
+	Body    string
+	Data    any
+	RawBody io.ReadCloser
 }
 
 func fetch(urlStr string, options ...string) *Response {
@@ -127,8 +131,11 @@ func fetch(urlStr string, options ...string) *Response {
 	}
 	methods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions,
 		http.MethodHead}
+	nobody := false
 	for _, option := range options {
 		switch {
+		case option == NOBODY:
+			nobody = true
 		case slices.Contains(methods, option):
 			req.Method = option
 		case strings.HasPrefix(option, "@"):
@@ -145,26 +152,35 @@ func fetch(urlStr string, options ...string) *Response {
 	}
 	response.Header = res.Header
 	response.Status = res.StatusCode
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
+	if !nobody {
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			response.Err = err
+			return response
+		}
+		response.Body = string(body)
+		data, err := util.Unmarshal(res.Header.Get("Content-Type"), bytes.NewReader(body))
+		response.Data = data
 		response.Err = err
-		return response
+	} else {
+		response.RawBody = res.Body
 	}
-	response.Body = string(body)
-	data, err := util.Unmarshal(res.Header.Get("Content-Type"), bytes.NewReader(body))
-	response.Data = data
-	response.Err = err
 	return response
 }
 
 // Encrypt data to base64 string
 func encrypt(password, salt, data any) string {
+	return base64.StdEncoding.EncodeToString(encrypt_binary(password, salt, data))
+}
+
+// Encrypt data to binary string
+func encrypt_binary(password, salt, data any) []byte {
 	// if password
 	cipher, err := util.GetCipher(any2string(password), any2string(salt))
 	if err != nil {
-		return ""
+		return nil
 	}
-	return util.EncryptToBase64String(cipher, []byte(any2string(data)))
+	return util.Encrypt(cipher, []byte(any2string(data)))
 }
 
 // Decrypt base64 data string

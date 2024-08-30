@@ -513,13 +513,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
 	}
-	if tplmode&2 == 1 {
+	if tplmode&2 != 0 {
 		useresbodytpl = true
 	}
 
 	var getTemplate func(contents string) (tpl Template, err error)
 	var tplStatus int
 	var tplHeader http.Header
+	var tplBody io.ReadCloser
 	if templateContents != "" || useresbodytpl {
 		tplStatus = 0
 		tplHeader = http.Header{}
@@ -528,6 +529,25 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			funcs := template.FuncMap{
 				"set_status": func(input any) string {
 					tplStatus, _ = strconv.Atoi(any2string(input))
+					return ""
+				},
+				"set_body": func(body any) string {
+					if body == nil {
+						tplBody = io.NopCloser(bytes.NewReader(nil))
+					} else {
+						switch v := body.(type) {
+						case io.ReadCloser:
+							tplBody = v
+						case io.Reader:
+							tplBody = io.NopCloser(v)
+						case []byte:
+							tplBody = io.NopCloser(bytes.NewReader(v))
+						case string:
+							tplBody = io.NopCloser(strings.NewReader(v))
+						default:
+							tplBody = io.NopCloser(strings.NewReader(fmt.Sprint(v)))
+						}
+					}
 					return ""
 				},
 				"set_header": func(key, value any) string {
@@ -867,7 +887,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			if status != -1 {
 				res.StatusCode = http.StatusOK
 			}
-			res.Body = io.NopCloser(buf)
 			res.Header.Del("Content-Length")
 			res.Header.Del("Content-Encoding")
 			if responseContentType == "" {
@@ -878,6 +897,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			}
 			for key := range tplHeader {
 				res.Header.Set(key, tplHeader.Get(key))
+			}
+			if tplBody != nil {
+				res.Body = tplBody
+			} else {
+				res.Body = io.NopCloser(buf)
 			}
 		}
 	}
@@ -909,9 +933,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 		if encmode&4 != 0 { // bit 2: whole meta + body in encrypted body
 			bodyIsString := false
-			if encmode&8 == 1 { // bit 3:  Force treat original body as string
+			if encmode&8 != 0 { // bit 3:  Force treat original body as string
 				bodyIsString = true
-			} else if encmode&16 == 1 { // bit 4:  Force treat original body as binary
+			} else if encmode&16 != 0 { // bit 4:  Force treat original body as binary
 				bodyIsString = false
 			} else if util.IsTextualMediaType(mediaType) {
 				bodyIsString = true
