@@ -39,6 +39,8 @@ const (
 	SUB_PREFIX             = "sub_"
 	SUBR_PREFIX            = "subr_"
 	SUBB_PREFIX            = "subb_"
+	SUBTYPE_STRING         = "subtype"
+	SUBPATH_STRING         = "subpath"
 	CORS_STRING            = "cors"
 	NOCACHE_STRING         = "nocache"
 	NORF_STRING            = "norf"
@@ -72,7 +74,8 @@ const (
 	ENCMODE_STRING         = "encmode"
 	AUTHMODE_STRING        = "authmode"
 	TPLMODE_STRING         = "tplmode"
-	RESBODYTPL_STRING      = "resbodytpl" // use response body as template. path suffix, e.g. ".sgp.txt"
+	TPLPATH_STRING         = "tplpath"
+	TPLTYPE_STRING         = "tpltype"
 	DEBUG_STRING           = "debug"
 	EPATH_STRING           = "epath" // allow subpath in encrypted url
 	SALT_STRING            = "salt"
@@ -296,11 +299,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	nocache := false
 	norf := false // no redirect following
 	debug := false
-	useresbodytpl := false
 	proxy := ""
 	impersonate := ""
 	timeout := int64(0)
-	tplmode := 0
+	// bit 0 (1): text template;
+	// bit 1 (2): use response body as template;
+	// bit 2 (4): do not read original response body as context var;
+	// bit 3 (8): always do response body template no matter of url path of original response body type;
+	var tplmode = 0
 	encmode := 0
 	authmode := 0
 	cookie := ""
@@ -310,7 +316,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	body := ""
 	forwardBody := false
 	templateContents := ""
-	var resBodyTemplate Template
 	contentType := ""
 	responseContentType := ""
 	responseMediaType := ""
@@ -326,6 +331,13 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var scopes []string
 	var referers []string
 	var origines []string
+	var tplpathes []string // suffixes, if url ends with any suffix, do template. e.g. ".sgp.txt"
+	var subpathes []string // suffixes, if url ends with any suffix, do substitutions.
+	// Mediatypes, if response has any of content type, do template. e.g. "txt" or "text/plain".
+	// Could be a ["*"] single element slice to allow all.
+	var tpltypes []string
+	// Do subs for these content-types. could be a ["*"] single element slice to allow all.
+	var subtypes []string
 	now := time.Now().Unix()
 	for key := range queryParams {
 		var values []string
@@ -359,12 +371,33 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			if err != nil || (status != 0 && status != -1 && (status < 100 || status > 599)) {
 				return nil, fmt.Errorf("invalid status %q: %v", value, err)
 			}
-		case RESBODYTPL_STRING:
+		case TPLPATH_STRING:
 			for _, value := range values {
-				if value != "" && strings.HasSuffix(urlObj.Path, value) {
-					useresbodytpl = true
+				if value != "" {
+					tplpathes = append(tplpathes, value)
+				}
+			}
+		case SUBPATH_STRING:
+			for _, value := range values {
+				if value != "" {
+					subpathes = append(subpathes, value)
+				}
+			}
+		case TPLTYPE_STRING:
+			for _, value := range values {
+				if value == "*" {
+					tpltypes = []string{"*"}
 					break
 				}
+				tpltypes = append(tpltypes, util.MediaType(util.ContentType(value)))
+			}
+		case SUBTYPE_STRING:
+			for _, value := range values {
+				if value == "*" {
+					subtypes = []string{"*"}
+					break
+				}
+				subtypes = append(subtypes, util.MediaType(util.ContentType(value)))
 			}
 		case SALT_STRING:
 			salt = value
@@ -512,78 +545,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	}
 	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
-	}
-	if tplmode&2 != 0 {
-		useresbodytpl = true
-	}
-
-	var getTemplate func(contents string) (tpl Template, err error)
-	var tplStatus int
-	var tplHeader http.Header
-	var tplBody io.ReadCloser
-	if templateContents != "" || useresbodytpl {
-		tplStatus = 0
-		tplHeader = http.Header{}
-		getTemplate = func(contents string) (tpl Template, err error) {
-			// dummy side effect template funcs to update request-scope state
-			funcs := template.FuncMap{
-				"set_status": func(input any) string {
-					tplStatus, _ = strconv.Atoi(any2string(input))
-					return ""
-				},
-				"set_body": func(body any) string {
-					if body == nil {
-						tplBody = io.NopCloser(bytes.NewReader(nil))
-					} else {
-						switch v := body.(type) {
-						case io.ReadCloser:
-							tplBody = v
-						case io.Reader:
-							tplBody = io.NopCloser(v)
-						case []byte:
-							tplBody = io.NopCloser(bytes.NewReader(v))
-						case string:
-							tplBody = io.NopCloser(strings.NewReader(v))
-						default:
-							tplBody = io.NopCloser(strings.NewReader(fmt.Sprint(v)))
-						}
-					}
-					return ""
-				},
-				"set_header": func(key, value any) string {
-					keyStr := any2string(key)
-					valueStr := any2string(value)
-					if valueStr == "" {
-						tplHeader.Del(keyStr)
-					} else {
-						tplHeader.Set(keyStr, valueStr)
-					}
-					return ""
-				},
-			}
-			if responseMediaType == constants.MEDIATYPE_HTML && tplmode&1 == 0 {
-				if isSigned {
-					tpl, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
-						Parse(contents)
-				} else {
-					tpl, err = htmlTemplate.New("template").Funcs(funcs).Parse(contents)
-				}
-			} else {
-				if isSigned {
-					tpl, err = template.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
-						Parse(contents)
-				} else {
-					tpl, err = template.New("template").Funcs(funcs).Parse(contents)
-				}
-			}
-			return tpl, err
-		}
-	}
-
-	if templateContents != "" && !useresbodytpl {
-		if resBodyTemplate, err = getTemplate(templateContents); err != nil {
-			return nil, fmt.Errorf("invalid template: %v", err)
-		}
 	}
 
 	// In the beginning of this func, it already checks if sign is required but not signed.
@@ -759,7 +720,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 	}
 
-	originalResponseContentType := res.Header.Get("Content-Type")
+	originalResponseMediaType := util.MediaType(res.Header.Get("Content-Type"))
 	res.Header.Del("Strict-Transport-Security")
 	res.Header.Del("Clear-Site-Data")
 	res.Header.Del("Set-Cookie")
@@ -808,8 +769,28 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		res.Header.Set("Content-Type", responseContentType)
 	}
 
-	if (len(subs) > 0 || len(subrs) > 0 || len(subbs) > 0) && res.Body != nil &&
-		(forcesub || util.IsTextualMediaType(util.MediaType(res.Header.Get("Content-Type")))) {
+	dosub := func() bool {
+		if (len(subs) == 0 && len(subrs) == 0 && len(subbs) == 0) || res.Body == nil {
+			return false
+		}
+		if forcesub {
+			return true
+		}
+		if len(subpathes) > 0 && !slices.ContainsFunc(subpathes, func(suffix string) bool {
+			return strings.HasSuffix(urlObj.Path, suffix)
+		}) {
+			return false
+		}
+		if len(subtypes) > 0 {
+			if subtypes[0] != "*" && !slices.Contains(subtypes, originalResponseMediaType) {
+				return false
+			}
+		} else if !util.IsTextualMediaType(originalResponseMediaType) {
+			return false
+		}
+		return true
+	}()
+	if dosub {
 		res.Body, err = NewReadCloserReplacer(res.Body, subs, subrs, subbs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create body replacer: %v", err)
@@ -818,15 +799,104 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		res.Header.Del("Content-Encoding")
 	}
 
-	if useresbodytpl && res.Body != nil {
-		body, err := io.ReadAll(res.Body)
-		res.Body.Close()
-		res.Body = nil
-		if err != nil {
-			return util.ErrResponseMsg("Failed to read body: %v", err), nil
-		}
-		if resBodyTemplate, err = getTemplate(string(body)); err != nil {
-			return nil, fmt.Errorf("invalid bodytpl template: %v", err)
+	var tplStatus int
+	var tplHeader http.Header
+	var tplBody io.ReadCloser
+	var resBodyTemplate Template
+	if templateContents != "" || tplmode&2 != 0 {
+		dotpl := func() bool {
+			if tplmode&2 != 0 && res.Body == nil {
+				return false
+			}
+			if tplmode&8 != 0 {
+				return true
+			}
+			if len(tplpathes) > 0 && !slices.ContainsFunc(tplpathes, func(suffix string) bool {
+				return strings.HasSuffix(urlObj.Path, suffix)
+			}) {
+				return false
+			}
+			if len(tpltypes) > 0 {
+				if tpltypes[0] != "*" && !slices.Contains(tpltypes, originalResponseMediaType) {
+					return false
+				}
+			} else if !util.IsTextualMediaType(originalResponseMediaType) {
+				return false
+			}
+			return true
+		}()
+		if dotpl {
+			tplHeader = http.Header{}
+			getTemplate := func(contents string, usehtml bool) (tpl Template, err error) {
+				// dummy side effect template funcs to update request-scope state
+				funcs := template.FuncMap{
+					"set_status": func(input any) string {
+						tplStatus, _ = strconv.Atoi(any2string(input))
+						return ""
+					},
+					"set_body": func(body any) string {
+						if body == nil {
+							tplBody = io.NopCloser(bytes.NewReader(nil))
+						} else {
+							switch v := body.(type) {
+							case io.ReadCloser:
+								tplBody = v
+							case io.Reader:
+								tplBody = io.NopCloser(v)
+							case []byte:
+								tplBody = io.NopCloser(bytes.NewReader(v))
+							case string:
+								tplBody = io.NopCloser(strings.NewReader(v))
+							default:
+								tplBody = io.NopCloser(strings.NewReader(fmt.Sprint(v)))
+							}
+						}
+						return ""
+					},
+					"set_header": func(key, value any) string {
+						keyStr := any2string(key)
+						valueStr := any2string(value)
+						if valueStr == "" {
+							tplHeader.Del(keyStr)
+						} else {
+							tplHeader.Set(keyStr, valueStr)
+						}
+						return ""
+					},
+				}
+				if usehtml {
+					if isSigned {
+						tpl, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
+							Parse(contents)
+					} else {
+						tpl, err = htmlTemplate.New("template").Funcs(funcs).Parse(contents)
+					}
+				} else {
+					if isSigned {
+						tpl, err = template.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
+							Parse(contents)
+					} else {
+						tpl, err = template.New("template").Funcs(funcs).Parse(contents)
+					}
+				}
+				return tpl, err
+			}
+			usehtml := responseMediaType == constants.MEDIATYPE_HTML && tplmode&1 == 0
+			if tplmode&2 == 0 {
+				if resBodyTemplate, err = getTemplate(templateContents, usehtml); err != nil {
+					return nil, fmt.Errorf("invalid template: %v", err)
+				}
+			} else {
+				body, err := io.ReadAll(res.Body)
+				res.Body.Close()
+				res.Body = nil
+				if err != nil {
+					return util.ErrResponseMsg("Failed to read body: %v", err), nil
+				}
+				if resBodyTemplate, err = getTemplate(string(body), usehtml); err != nil {
+					return nil, fmt.Errorf("invalid bodytpl template: %v", err)
+				}
+			}
 		}
 	}
 
@@ -850,21 +920,25 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			"Status": res.StatusCode,
 			"Header": res.Header,
 		}
-		if responseBodyType == "" && originalResponseContentType != "" {
-			responseBodyType = util.MediaType(originalResponseContentType)
+		if responseBodyType == "" && originalResponseMediaType != "" {
+			responseBodyType = originalResponseMediaType
 		}
 		var data any
-		if !useresbodytpl {
-			var body []byte
-			if res.Body != nil {
-				body, err = io.ReadAll(res.Body)
-				res.Body.Close()
-				if err != nil {
-					return util.ErrResponseMsg("Failed to read body: %v", err), nil
+		if tplmode&2 == 0 {
+			if tplmode&4 == 0 {
+				var body []byte
+				if res.Body != nil {
+					body, err = io.ReadAll(res.Body)
+					res.Body.Close()
+					if err != nil {
+						return util.ErrResponseMsg("Failed to read body: %v", err), nil
+					}
+					data, tplerr = util.Unmarshal(responseBodyType, bytes.NewReader(body))
 				}
-				data, tplerr = util.Unmarshal(responseBodyType, bytes.NewReader(body))
+				response["Body"] = string(body)
+			} else {
+				response["Body"] = res.Body
 			}
-			response["Body"] = string(body)
 		} else {
 			response["Body"] = templateContents
 			data, tplerr = util.Unmarshal(responseBodyType, strings.NewReader(templateContents))

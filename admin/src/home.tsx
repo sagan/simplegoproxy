@@ -164,7 +164,7 @@ export default function Home({}) {
             />
             <span>🔒&nbsp;Encrypt</span>
           </label>
-          <label title="Allow encrypted url to have plaintext subpath and query variables">
+          <label title="Allow encrypted url to have plaintext children path and query variables">
             <input
               defaultChecked={!!searchParams.get("epath")}
               type="checkbox"
@@ -326,6 +326,18 @@ export default function Home({}) {
               <option title="subb_HexString=Replacement" value="subb_">
                 subb_
               </option>
+              <option
+                value="subpath"
+                title="Do response body substitutions if the url path ends with this value (suffix), e.g. '.txt'"
+              >
+                subpath
+              </option>
+              <option
+                value="subtype"
+                title="Do response body substitutions if the response has this content type, e.g. 'txt' or 'text/plain'"
+              >
+                subtype
+              </option>
               <option title="fdheaders=Header1,Header2" value="fdheaders">
                 fdheaders
               </option>
@@ -348,10 +360,16 @@ export default function Home({}) {
                 validafter
               </option>
               <option
-                value="resbodytpl"
-                title="Treat target url response body as template string if the url path ends with this value (suffix)"
+                value="tplpath"
+                title="Do response template if the url path ends with this value (suffix), e.g. '.txt'"
               >
-                resbodytpl
+                tplpath
+              </option>
+              <option
+                value="tpltype"
+                title="Do response templalte if the response has this content type, e.g. 'txt' or 'text/plain'"
+              >
+                tpltype
               </option>
               <option title="proxy=socks5://1.2.3.4:1080" value="proxy">
                 proxy
@@ -672,11 +690,23 @@ export default function Home({}) {
                   </option>
                   <option
                     value="2"
-                    title="Always use target url response body as template"
+                    title="Use original response body as template"
                   >
-                    Res Body Tpl (2)
+                    BodyTpl (2)
+                  </option>
+                  <option
+                    value="4"
+                    title="Do not read original response body prior renderring template"
+                  >
+                    NoOriginalBody (4)
+                  </option>
+                  <option value="8" title="Always do response template">
+                    AlwaysDo (8)
                   </option>
                   <option value="3">Text(1)+BodyTpl(2)</option>
+                  <option value="5">Text(1)+NOB(4)</option>
+                  <option value="11">Text(1)+BodyTpl(2)+Always(8)</option>
+                  <option value="13">Text(1)+NOB(4)+Always(8)</option>
                 </select>
               </label>
             </p>

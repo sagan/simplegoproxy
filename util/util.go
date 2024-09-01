@@ -549,7 +549,13 @@ func fetchExec(netreq *NetRequest) (res *http.Response, err error) {
 		log.Printf("Run %s %v", localfilepath, args)
 	}
 	body, err := runProcess(netreq.Req.Context(), localfilepath, args, netreq.Timeout, netreq.Debug)
-	return processResponse(body, err, ""), nil
+	res = processResponse(body, err, "")
+	if res.StatusCode == http.StatusOK && !netreq.Debug {
+		if typ := queryParams.Get("type"); typ != "" {
+			res.Header.Set("Content-Type", ContentType(typ))
+		}
+	}
+	return res, nil
 }
 
 // https://rclone.org/commands/rclone_cat/

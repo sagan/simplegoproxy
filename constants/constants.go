@@ -11,7 +11,7 @@ const MEDIATYPE_HTML = "text/html"
 
 const LINE_BREAKS = "\r\n"
 
-// seconds of 1 years, aka: infinite.
+// seconds of 100 years, aka: infinite.
 const INFINITE_TIMEOUT = 86400 * 365 * 100
 
 // match with a encrypted url base62 string

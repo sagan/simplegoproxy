@@ -159,6 +159,8 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_sub_<string>=<replacement>` : Response body substitutions. Similar to nginx [http_sub](https://nginx.org/en/docs/http/ngx_http_sub_module.html) module. See below "Response body substitutions" section.
 - `_sgp_subr_<Regexp>=<replacement>` : Similar to `_spg_sub_*` but do regexp find and replacement.
 - `_sgp_subb_<HexString>=<replacement>` : Similar to `_spg_sub_*` but do binary bytes find and replacement.
+- `_sgp_subpath=<value>`: Apply response substitutions only if target url path ends with this value. E.g. `.html`. Can be set multiple times.
+- `_sgp_subtype=<value>`: Apply response substitutions only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
 - `_sgp_forcesub` : (Value ignored) Force do response body substitutions on any MIME type response.
 - `_sgp_cookie=<value>` : Set request cookie. Equivalent to `_sgp_header_cookie=<value>`.
 - `_sgp_type=<value>` : Set the request content type. Similar to `_sgp_header_Content-Type=<value>`.
@@ -169,7 +171,6 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_resbody=<value>` : Set the response body template.
 - `_sgp_resbodytype=<value>` : The original response body type, e.g. `json`, `xml`, `yaml`, `toml`.
-- `_sgp_resbodytpl` : Treat target url response body as template string, if the url path ends with this value (suffix). Can be set multiple times. E.g. `.gohtml`.
 - `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. By default some headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`. Some values have special meanings:
   - `*`: ALL request headers.
   - `%0A` (\n) : Supresses default forwarding headers and makes sure no headers would be forwarded.
@@ -181,13 +182,15 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_keytype=<value>` : The sign key type. See below "Signing key type" section.
 - `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
 - `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
-- `_sgp_epath` : (Value ignored) Enabl plaintext subpath and normal query variables for encrypted url.
+- `_sgp_epath` : (Value ignored) Enable plaintext children and normal query variables for encrypted url.
 - `_sgp_status=<value>` : Force set http response status code sent back to client. E.g. `200`, `403`. Special values: `-1` - Use original http response code.
 - `_sgp_auth=user:pass` : The auth username & password for request to the Simplegoproxy server. See below "Request authentication" section.
 - `_sgp_authmode=1` : The request authentication mode. See below "Request authentication" section.
 - `_sgp_respass=<value>` : The password to encrypt the response. See below "Response encrpytion" section.
 - `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
 - `_sgp_tplmode=1` : The response template mode, bitwise flags integer. See below "Response template" section.
+- `_sgp_tplpath=<value>`: Apply response template only if target url path ends with this value. E.g. `.gohtml`. Can be set multiple times.
+- `_sgp_tpltype=<value>`: Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
 - `_sgp_salt=<value>` : The response encryption key salt.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
@@ -211,7 +214,11 @@ http://localhost:8380/_sgp_cors/https://ipcfg.co/json
 
 Response body substitutions modify the original http response returned by the target url server, replacing one certain string (needle) with another (replacement). It's somewhat similar to nginx [http_sub](https://nginx.org/en/docs/http/ngx_http_sub_module.html) module.
 
-By default response body substitutions only apply to the response with a "textual" [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types), which could be any one of the following: `text/*`, `application/json`, `application/xml`, `application/yaml`, `application/toml`, `application/atom+xml`, `application/x-sh`. Set the `_sgp_forcesub=1` parameter to force do substitutions on any MIME type response.
+The response body substitutions is only applied when certain conditions meet. Change default behavior by setting the follow parameters:
+
+- `_sgp_subpath=<value>`: Apply substitutions only if target url path ends with this value. E.g. `.html`. Can be set multiple times. If none is set, url path suffix check is skipped.
+- `_sgp_subtype=<value>`: Apply substitutions only if target url original response has this [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types) ("Content-Type"). E.g. `txt`, `text/plain`. Can be set multiple times. Set to `*` to accept all content-types. If none is set, default behavior is to apply substitutions if the original response has a textual content type, which could be any one of the following: `text/*`, `application/json`, `application/xml`, `application/yaml`, `application/toml`, `application/atom+xml`, `application/x-sh`.
+- `_sgp_forcesub=1`: Force do substitutions on any response, no matter of it's url path suffix or content type.
 
 To do response body substitutions, use any of the following parameters to set the find-and-replace rule(s). These parameters can be specified multiple times. Note both the needle and replacement part of the string should be url encoded.
 
@@ -262,10 +269,12 @@ The context (available variables):
 
 Notes:
 
+- The response template is only applied when certain conditions meet. Change default behavior by setting the follow parameters:
+  - `_sgp_tplpath=<value>`: Apply response template only if target url path ends with this value. E.g. `.gohtml`. Can be set multiple times. If none is set, url path suffix check is skipped.
+  - `_sgp_tpltype=<value>`: Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Set to `*` to accept all content-types. If none is set, default behavior is to apply template if the original response has a textual "Content-Type".
 - The `res.data` is by default parsed according to original http response's content-type header. You can forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
 - The status of rendered response is `200` by default, use `_sgp_status` parameter to override it.
 - The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
-- If any `_sgp_resbodytpl=.gohtml` parameter is set, Simplegoproxy will use the original response body of target url as the template string if the url's path ends with this value `.gohtml`, renderring it using the above context. The `_sgp_resbody` will instead serve as `Res.Body` context variable in this case.
 - If `_sgp_restype` is set to "html", the template renderring will use Go [html/template](https://pkg.go.dev/html/template); otherwise it will use Go [text/template](https://pkg.go.dev/text/template).
 - Some special functions can be used in templates to change the response status code and / or header. These functions always return empty string.
   - `set_status(status)` : Set response status code.
@@ -275,21 +284,28 @@ Notes:
 If current entrypoint url is signed, some more pre-defined functions are available in template:
 
 - `atob` and `btoa`, Do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob).
-- `fetch(url, options...)` : Do a arbitary http request, return `{Err, Status, Header, RawBody, Body, Data}`.
+- `fetch(options...)` : Do a arbitary http request, return `{Err, Status, Header, RawBody, Body, Data}`.
   - The `options` args is an string array which elements could be any of:
     - http method: e.g. `GET`.
     - http header: e.g. `Content-Type: text/plain`.
     - http request body: starts with `@`, e.g. `@a=1&b=2`.
     - `NOBODY` : special flag, do not read and parse response body.
+    - A string starts with `https://` or `http://` : the target url to fetch.
   - `Body`, `Data`: The response body string and parsed data object. Set when `NOBODY` is not set.
   - `RawBody`: The raw response body (`io.ReadCloser`). Set when `NOBODY` is set.
+- `read(input)` : Read a `io.ReadCloser` or `io.Reader`, return all of it's contents as `[]byte`.
+- `unmarshal(typ, data)` : Parse data (string or []byte) to object according to type. `typ` could be file ext (e.g. `txt`) or mediatype (e.g. `text/plain`).
+- `marshal(typ, data)` : Serialize data to string.
+- ....
 - For full func list, see [proxy/template.go](https://github.com/sagan/simplegoproxy/blob/master/proxy/template.go).
 - Plus with all functions from Go [Sprig](https://github.com/Masterminds/sprig) library.
 
 The `_sgp_tplmode` (template mode, default to 0) is a bitwise flags integer parameter that can control several response template behaviors:
 
 - bit 0 (`& 1`): Always uses text template, never uses html template..
-- bit 1 (`& 2`) : Always use target url response body as template.
+- bit 1 (`& 2`) : Use target url original response body as template. In this case, the `_sgp_resbody` is not mandatory required; it will instead serve as `Res.Body` context variable.
+- bit 2 (`& 4`) : Do not read target url original response body prior renderring. The `Res.Body` context variable will be raw `io.ReadCloser` in this case.
+- bit 3 (`& 8`) : Always do response template no matter of target url path suffix or response content type.
 
 Template example:
 
@@ -338,6 +354,9 @@ If `-enable-unix`, `-enable-file`, `-enable-rclone` or `-enable-exec` flag is se
   - For a dir, it will run `rclone lsjson remote:path` to get file list of the dir, and output the Directory Index page to client.
 - `-enable-curl` : Make Simplegoproxy supports `curl+*://` urls, which will spawn a [curl](https://curl.se/docs/manpage.html) process to fetch the actual url. Target url example: `curl+https://ipinfo.io`. It lookups curl from PATH. To use other location, use `-curl-binary` flag.
 - `-enable-exec` : Make Simplegoproxy supports `exec://` urls, which spawn a child process and return it's stdout to client. Target url example: `exec://curl?args=-i+ipinfo.io`, which will execute `curl -i ipinfo.io`. You can also specify the full path of executable file use the same format as `file://` scheme url.
+  - By default, If the spawned process started successfully, it sends `200` status code immediately to client and then piping the stdout of spawned process to response body; if the process finally exits with non-zero, there is no way to notify it to client.
+  - If `_sgp_timeout=10` pamameter is set, it will wait for at most this time (seconds) before beginning sending the stdout of process to client. If the process exitted within this time range with a non-zero exit code, it will send `500` status to client.
+  - By default the response's Content-Type is `text/plain`. Use `_sgp_restype` parameter or `type` normal query variable to override it.
 
 For `rclone://`, `curl+*//`, `exec://` urls, if `_sgp_debug` modification parameter is set, it will output the combined stdout and stderr of spawned child process, instead of stdout only.
 
@@ -489,7 +508,7 @@ It's possible to prepand a fixed `eid` (encrypted url id) string to the beginnin
 
 The target urls are encrypted using "key" flag value as the cryptographic key. If you change the key, all previously generated entrypoint urls will be inaccessible.
 
-If the `_sgp_epath` parameter is set, the encrypted url can also take a suffix of subpath and / or normal query variables. For example, if `http://localhost:8380/aabbccddeeff` is the encrypted entrypoint url of `http://example.com/test/`, then `http://localhost:8380/aabbccddeeff/subpath?foo=bar` can be used to access `http://example.com/test/subpath?foo=bar`. Note you also need to set the `_sgp_scope` (scope signing) parameter to sign the whole scope urls, or it will not work.
+If the `_sgp_epath` parameter is set, the encrypted url can also take a suffix of children path and / or normal query variables. For example, if `http://localhost:8380/aabbccddeeff` is the encrypted entrypoint url of `http://example.com/test/`, then `http://localhost:8380/aabbccddeeff/children/path?foo=bar` can be used to access `http://example.com/test/children/path?foo=bar` target url. Note you also need to set the `_sgp_scope` (scope signing) parameter to sign the whole scope target urls, or it will not work.
 
 ### Request authentication
 

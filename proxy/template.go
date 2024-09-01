@@ -29,6 +29,7 @@ var templateFuncMap = map[string]any{
 	"decrypt_binary": decrypt_binary,
 	"neg":            neg,
 	"abs":            absFunc,
+	"read":           read,
 	"fetch":          fetch,
 }
 
@@ -115,36 +116,43 @@ type Response struct {
 	RawBody io.ReadCloser
 }
 
-func fetch(urlStr string, options ...string) *Response {
+func fetch(options ...string) *Response {
+	methods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions,
+		http.MethodHead}
+	urlStr := ""
+	nobody := false
+	method := http.MethodGet
+	header := http.Header{}
+	var body io.ReadCloser
+	for _, option := range options {
+		switch {
+		case strings.HasPrefix(option, "http://") || strings.HasPrefix(option, "https://"):
+			urlStr = option
+		case option == NOBODY:
+			nobody = true
+		case slices.Contains(methods, option):
+			method = option
+		case strings.HasPrefix(option, "@"):
+			body = io.NopCloser(strings.NewReader(option[1:]))
+		case strings.ContainsRune(option, ':'):
+			key, value, _ := strings.Cut(option, ":")
+			header.Add(strings.TrimSpace(key), strings.TrimSpace(value))
+		}
+	}
+
 	response := &Response{}
 	if urlStr == "" {
 		response.Err = fmt.Errorf("no url")
 		return response
 	}
-	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
-		urlStr = "https://" + urlStr
-	}
-	req, err := http.NewRequest(http.MethodGet, urlStr, nil)
+	req, err := http.NewRequest(method, urlStr, nil)
 	if err != nil {
 		response.Err = err
 		return response
 	}
-	methods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions,
-		http.MethodHead}
-	nobody := false
-	for _, option := range options {
-		switch {
-		case option == NOBODY:
-			nobody = true
-		case slices.Contains(methods, option):
-			req.Method = option
-		case strings.HasPrefix(option, "@"):
-			req.Body = io.NopCloser(strings.NewReader(option[1:]))
-		case strings.ContainsRune(option, ':'):
-			key, value, _ := strings.Cut(option, ":")
-			req.Header.Add(strings.TrimSpace(key), strings.TrimSpace(value))
-		}
-	}
+	req.Header = header
+	req.Body = body
+
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		response.Err = err
@@ -225,4 +233,26 @@ func absFunc(a any) int {
 		return -v
 	}
 	return v
+}
+
+// Read full contents of a io.Reader or ReadCloser
+func read(input any) (data []byte) {
+	if input == nil {
+		return nil
+	}
+	switch v := input.(type) {
+	case io.ReadCloser:
+		data, _ = io.ReadAll(v)
+		v.Close()
+		return data
+	case io.Reader:
+		data, _ = io.ReadAll(v)
+		return data
+	case []byte:
+		return v
+	case string:
+		return []byte(v)
+	default:
+		return []byte(fmt.Sprint(v))
+	}
 }
