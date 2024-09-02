@@ -76,6 +76,8 @@ const (
 	TPLMODE_STRING         = "tplmode"
 	TPLPATH_STRING         = "tplpath"
 	TPLTYPE_STRING         = "tpltype"
+	INDEXFILE_STRING       = "indexfile"
+	MD2HTML_STRING         = "md2html"
 	DEBUG_STRING           = "debug"
 	EPATH_STRING           = "epath" // allow subpath in encrypted url
 	SALT_STRING            = "salt"
@@ -297,7 +299,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	trimresheader := false
 	nocsp := false
 	nocache := false
-	norf := false // no redirect following
+	norf := false    // no redirect following
+	md2html := false // render markdown to html
 	debug := false
 	proxy := ""
 	impersonate := ""
@@ -306,6 +309,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	// bit 1 (2): use response body as template;
 	// bit 2 (4): do not read original response body as context var;
 	// bit 3 (8): always do response body template no matter of url path of original response body type;
+	// bit 4 (16): rendered output keep original response content-type unchanged
 	var tplmode = 0
 	encmode := 0
 	authmode := 0
@@ -326,6 +330,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	keytype := ""
 	sign := ""
 	salt := ""
+	indexfile := ""
 	// password to encrypt final response body to client
 	var respass = ""
 	var scopes []string
@@ -401,6 +406,10 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			}
 		case SALT_STRING:
 			salt = value
+		case INDEXFILE_STRING:
+			indexfile = value
+		case MD2HTML_STRING:
+			md2html = true
 		case DEBUG_STRING:
 			debug = true
 		case CORS_STRING:
@@ -443,18 +452,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		case TYPE_STRING:
 			contentType = value
 		case RESTYPE_STRING:
-			if value != "" {
-				if value == "*" { // guess from url path
-					if strings.HasSuffix(urlObj.Path, "/") {
-						responseContentType = constants.MIME_HTML
-					} else {
-						responseContentType = util.FileContentType(urlObj.Path)
-					}
-				} else {
-					responseContentType = util.ContentType(value)
-				}
-				responseMediaType = util.MediaType(responseContentType)
-			}
+			responseContentType = value
 		case RESBODYTYPE_STRING:
 			responseBodyType = value
 		case KEYTYPE_STRING:
@@ -539,6 +537,22 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				}
 			}
 		}
+	}
+	effectiveUrlPath := urlObj.Path
+	if strings.HasSuffix(effectiveUrlPath, "/") && indexfile != "" {
+		effectiveUrlPath += indexfile
+	}
+	if responseContentType != "" {
+		if responseContentType == "*" { // guess from url path
+			if strings.HasSuffix(effectiveUrlPath, "/") {
+				responseContentType = constants.MIME_HTML
+			} else {
+				responseContentType = util.FileContentType(effectiveUrlPath)
+			}
+		} else {
+			responseContentType = util.ContentType(responseContentType)
+		}
+		responseMediaType = util.MediaType(responseContentType)
 	}
 	if len(referers) > 0 && !util.MatchUrlPatterns(referers, srcReq.Header.Get("Referer"), true) {
 		return nil, fmt.Errorf("invalid referer '%s', allowed referers: %v", srcReq.Header.Get("Referer"), referers)
@@ -688,6 +702,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 	} else {
 		urlStr := originalUrlObj.String()
+		if strings.HasSuffix(urlStr, "/") && indexfile != "" {
+			urlStr += indexfile
+		}
 		var reqBody io.Reader
 		if forwardBody && srcReq.Body != nil {
 			reqBody = srcReq.Body
@@ -777,7 +794,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			return true
 		}
 		if len(subpathes) > 0 && !slices.ContainsFunc(subpathes, func(suffix string) bool {
-			return strings.HasSuffix(urlObj.Path, suffix)
+			return strings.HasSuffix(effectiveUrlPath, suffix)
 		}) {
 			return false
 		}
@@ -795,8 +812,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if err != nil {
 			return nil, fmt.Errorf("failed to create body replacer: %v", err)
 		}
-		res.Header.Del("Content-Length")
-		res.Header.Del("Content-Encoding")
+		deleteContentHeaders(res.Header)
 	}
 
 	var tplStatus int
@@ -812,7 +828,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				return true
 			}
 			if len(tplpathes) > 0 && !slices.ContainsFunc(tplpathes, func(suffix string) bool {
-				return strings.HasSuffix(urlObj.Path, suffix)
+				return strings.HasSuffix(effectiveUrlPath, suffix)
 			}) {
 				return false
 			}
@@ -961,9 +977,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			if status != -1 {
 				res.StatusCode = http.StatusOK
 			}
-			res.Header.Del("Content-Length")
-			res.Header.Del("Content-Encoding")
-			if responseContentType == "" {
+			deleteContentHeaders(res.Header)
+			if responseContentType == "" && tplmode&16 == 0 {
 				res.Header.Set("Content-Type", constants.MIME_TXT)
 			}
 			if tplStatus > 0 {
@@ -978,6 +993,19 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				res.Body = io.NopCloser(buf)
 			}
 		}
+	}
+
+	if md2html && res.Body != nil &&
+		util.MediaType(util.ContentType(res.Header.Get("Content-Type"))) == constants.MEDIATYPE_MD {
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read body: %v", err)
+		}
+		html := util.MdToHTML(body)
+		res.Body = io.NopCloser(bytes.NewReader(html))
+		deleteContentHeaders(res.Header)
+		res.Header.Set("Content-Type", constants.MIME_HTML)
 	}
 
 	if respass != "" && res.Body != nil {
@@ -1283,4 +1311,11 @@ func NewReadCloserReplacer(src io.Reader, subs [][2]string, subrs [][2]string,
 	}
 	dst := replace.Chain(src, tt...)
 	return &ReadCloserReplacer{dst, src}, nil
+}
+
+// Delete Content-Length/Encoding/Range headers from header
+func deleteContentHeaders(header http.Header) {
+	header.Del("Content-Length")
+	header.Del("Content-Range")
+	header.Del("Content-Encoding")
 }

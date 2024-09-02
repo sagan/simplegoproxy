@@ -4,6 +4,12 @@ import (
 	"crypto/cipher"
 	"flag"
 	"fmt"
+	"log"
+	"os"
+	"slices"
+	"strings"
+
+	"github.com/sagan/simplegoproxy/constants"
 )
 
 const DEFAULT_PORT = 8380 // ASCII (Decimal) 'SP' (83 + 80)
@@ -38,6 +44,7 @@ var (
 	Pass                string
 	KeytypeBlacklist    []string
 	OpenScopes          ArrayFlags // scopes that do NOT need signing
+	Aliases             ArrayFlags // each alias format: "prefix=path"
 
 	Cipher cipher.AEAD
 )
@@ -90,4 +97,42 @@ func init() {
 	flag.StringVar(&Keytype, "keytype", "", `The sign keytype. Used with "-sign"`)
 	flag.StringVar(&KeytypeBlacklistStr, "keytypebl", "", "Comma-separated list of blacklisted keytypes")
 	flag.Var(&OpenScopes, "open-scope", `Used with request signing. Array list. Public scopes that urls of these scopes do not require signing. E.g. "http://example.com/*"`)
+	flag.Var(&Aliases, "alias", `Aliases. Array List. Each one format: "prefix=path"`)
+}
+
+// Parse flags from command line args and env.
+// It calls log.Fatalf if encounters any error.
+func DoParse() {
+	// Names list of flags which is of array type.
+	var arrayFlagNames = []string{"open-scope", "alias"}
+	flag.Parse()
+	flagsSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) {
+		flagsSet[f.Name] = true
+	})
+	flag.VisitAll(func(f *flag.Flag) {
+		if flagsSet[f.Name] {
+			return
+		}
+		envname := constants.SGP_ENV_PREFIX + strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
+		if envValue := os.Getenv(envname); envValue != "" {
+			if !slices.Contains(arrayFlagNames, f.Name) {
+				err := f.Value.Set(envValue)
+				if err != nil {
+					log.Fatalf("Failed to set %s flag to %q from env %s: %v", f.Name, envValue, envname, err)
+				}
+			} else {
+				values := strings.Split(envValue, ";")
+				for _, value := range values {
+					value = strings.TrimSpace(value)
+					if value != "" {
+						err := f.Value.Set(value)
+						if err != nil {
+							log.Fatalf("Failed to set array flag %s value %q", f.Name, value)
+						}
+					}
+				}
+			}
+		}
+	})
 }

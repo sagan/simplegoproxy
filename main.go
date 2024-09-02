@@ -6,8 +6,9 @@ import (
 	"log"
 	"mime"
 	"net/http"
-	"os"
+	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/sagan/simplegoproxy/admin"
@@ -24,28 +25,13 @@ func init() {
 	mime.AddExtensionType(".yaml", "application/yaml")
 	mime.AddExtensionType(".gotmpl", "text/plain")
 	mime.AddExtensionType(".gohtml", "text/html")
+	mime.AddExtensionType(".md", "text/markdown")
 }
 
 func main() {
 	var err error
-	flag.Parse()
+	flags.DoParse()
 	args := flag.Args()
-	flagsSet := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) {
-		flagsSet[f.Name] = true
-	})
-	flag.VisitAll(func(f *flag.Flag) {
-		if flagsSet[f.Name] {
-			return
-		}
-		envname := constants.SGP_ENV_PREFIX + strings.ReplaceAll(strings.ToUpper(f.Name), "-", "_")
-		if envValue := os.Getenv(envname); envValue != "" {
-			err := f.Value.Set(envValue)
-			if err != nil {
-				log.Fatalf("Failed to set %s flag to %q from env %s: %v", f.Name, envValue, envname, err)
-			}
-		}
-	})
 	if regexp.MustCompile(`^\d+$`).MatchString(flags.Addr) {
 		flags.Addr = ":" + flags.Addr
 	}
@@ -126,6 +112,31 @@ func main() {
 		return
 	}
 
+	// [][prefix, path]. longest prefix first.
+	// prefix & path always starts and ends with "/".
+	// e.g.: ["/abc/", "/sgp/_sgp_cors/example.com/"] .
+	var aliases = [][2]string{}
+	for _, a := range flags.Aliases {
+		prefix, path, found := strings.Cut(a, "=")
+		if !found || prefix == "" || path == "" {
+			log.Fatalf("invalid alias %q", a)
+		}
+		if !strings.HasPrefix(prefix, "/") {
+			prefix = "/" + prefix
+		}
+		if !strings.HasSuffix(prefix, "/") {
+			prefix += "/"
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		if !strings.HasSuffix(path, "/") {
+			path += "/"
+		}
+		aliases = append(aliases, [2]string{prefix, path})
+	}
+	slices.SortFunc(aliases, func(a, b [2]string) int { return len(b[0]) - len(a[0]) })
+
 	adminPath := flags.Rootpath + "admin/"
 	fmt.Printf("simplegoproxy %s starts on %s, rootpath=%s, prefix=%s, signing_enabled(key_set)=%t\n",
 		version.Version, flags.Addr, flags.Rootpath, flags.Prefix, flags.Key != "")
@@ -139,6 +150,12 @@ func main() {
 		fmt.Printf("Open scopes: %v\n", flags.OpenScopes)
 	}
 	fmt.Printf("simplegoproxy is a open source software. See: https://github.com/sagan/simplegoproxy\n")
+	if len(aliases) > 0 {
+		fmt.Printf("Aliases:\n")
+		for _, alias := range aliases {
+			fmt.Printf("  %s => %s\n", alias[0], alias[1])
+		}
+	}
 	fmt.Printf("\n")
 	if flags.Key == "" && (flags.EnableFile || flags.EnableUnix || flags.EnableRclone || flags.EnableCurl || flags.EnableExec) {
 		fmt.Printf("WARNING! Enabing non-http schemes without using signing is risky. You should only do it in local / test / sandbox env\n")
@@ -155,7 +172,27 @@ func main() {
 		if strings.HasPrefix(r.URL.Path, adminPath) {
 			adminHandle.ServeHTTP(w, r)
 			return
-		} else if strings.HasPrefix(r.URL.Path, flags.Rootpath) {
+		}
+		for _, alias := range aliases {
+			if strings.HasPrefix(r.URL.Path, alias[0]) {
+				p := r.URL.Path[len(alias[0]):]
+				rp := strings.TrimPrefix(r.URL.RawPath, alias[0])
+				if len(rp) > 0 && len(rp) == len(r.URL.RawPath) {
+					// invalid raw path
+					http.NotFound(w, r)
+					return
+				}
+				r2 := new(http.Request)
+				*r2 = *r
+				r2.URL = new(url.URL)
+				*r2.URL = *r.URL
+				r2.URL.Path = alias[1] + p
+				r2.URL.RawPath = alias[1] + rp
+				proxyHandle.ServeHTTP(w, r2)
+				return
+			}
+		}
+		if strings.HasPrefix(r.URL.Path, flags.Rootpath) {
 			if r.URL.Path == flags.Rootpath {
 				http.Redirect(w, r, flags.Rootpath+"admin/", http.StatusTemporaryRedirect)
 				return

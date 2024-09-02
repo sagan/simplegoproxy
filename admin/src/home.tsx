@@ -360,6 +360,12 @@ export default function Home({}) {
                 validafter
               </option>
               <option
+                title="Use a index file for directory, e.g. 'index.html'"
+                value="indexfile"
+              >
+                indexfile
+              </option>
+              <option
                 value="tplpath"
                 title="Do response template if the url path ends with this value (suffix), e.g. '.txt'"
               >
@@ -376,6 +382,9 @@ export default function Home({}) {
               </option>
               <option value="scope=">scope</option>
               <option value="scope=*://*/*">scope=*</option>
+              <option title="Render markdown to html" value="md2html=1">
+                md2html=1
+              </option>
               <option title="Set no-cache header on response" value="nocache=1">
                 nocache=1
               </option>
@@ -703,10 +712,20 @@ export default function Home({}) {
                   <option value="8" title="Always do response template">
                     AlwaysDo (8)
                   </option>
-                  <option value="3">Text(1)+BodyTpl(2)</option>
-                  <option value="5">Text(1)+NOB(4)</option>
-                  <option value="11">Text(1)+BodyTpl(2)+Always(8)</option>
-                  <option value="13">Text(1)+NOB(4)+Always(8)</option>
+                  <option
+                    value="16"
+                    title="Keep the content-type of original response unchanged"
+                  >
+                    KeepType (16)
+                  </option>
+                  <option value="3">Text(1)+BodyType(2)</option>
+                  <option value="5">Text(1)+NoOriginalBody(4)</option>
+                  <option value="11">Text(1)+BT(2)+A(8)</option>
+                  <option value="13">Text(1)+NOB(4)+A(8)</option>
+                  <option value="19">Text(1)+BT(2)+KT(16)</option>
+                  <option value="21">Text(1)+NOB(4)+KT(16)</option>
+                  <option value="27">Text(1)+BT(2)+A(8)+KT(16)</option>
+                  <option value="29">Text(1)+NOB(4)+A(8)+KT(16)</option>
                 </select>
               </label>
             </p>

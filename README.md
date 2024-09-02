@@ -26,6 +26,7 @@ TOC
   - [Admin UI](#admin-ui)
   - ["data:" urls](#data-urls)
   - [`unix://`, `file://`, `rclone://`, `curl+*//`, `exec://` urls](#unix-file-rclone-curl-exec-urls)
+  - [Aliases](#aliases)
 - [Security features](#security-features)
   - [Set the rootpath](#set-the-rootpath)
   - [Request signing](#request-signing)
@@ -57,6 +58,8 @@ Command-line flag arguments:
 ```
   -addr string
         Http listening addr, e.g. "127.0.0.1:8380" or ":8380". If not set, will listen on "0.0.0.0:8380" (default "0.0.0.0:8380")
+  -alias value
+        Aliases. Array List. Each one format: "name=path"
   -basic-auth
         Make admin UI use http basic authentication. If not set, it uses Digest authentication (more secure)
   -cors
@@ -113,7 +116,7 @@ Command-line flag arguments:
         Username of admin UI (Admin UI is available at "/admin" path) (default "root")
 ```
 
-All arguments are optional, and can also be set by environment variable. The environment variable name is the `SGP_` prefix concating flag name in uppercase and replacing `-` with `_`. E.g.: `enable-file` flag can be set by setting `SGP_ENABLE_FILE=true` env.
+All arguments are optional, and can also be set by environment variable. The environment variable name is the `SGP_` prefix concating flag name in uppercase and replacing `-` with `_`. E.g.: `enable-file` flag can be set by setting `SGP_ENABLE_FILE=true` env. For the array list type flags like `-open-scope`, the env value should be all array item values joined by `;`.
 
 ## Usage
 
@@ -126,7 +129,7 @@ curl -i "localhost:8380/https://ipcfg.co/json"
 curl -i "localhost:8380/ipcfg.co/json"
 ```
 
-The "entrypoint url" accepts GET requests only. By default it will just fetch the "target url" and return the original response, without any modification. Add specic query parameters to set the modification rules. E.g.:
+The "entrypoint url" accepts http requests. By default it will just fetch the "target url" and return the original response, without any modification. Add specic query parameters to set the modification rules. E.g.:
 
 ```
 curl -i "localhost:8380/https://ipcfg.co/json?_sgp_cors"
@@ -191,6 +194,8 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_tplmode=1` : The response template mode, bitwise flags integer. See below "Response template" section.
 - `_sgp_tplpath=<value>`: Apply response template only if target url path ends with this value. E.g. `.gohtml`. Can be set multiple times.
 - `_sgp_tpltype=<value>`: Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
+- `_sgp_indexfile=<value>` : If this parameter is set and the current target url ends with `/`, Simplegoproxy will append this parameter to the end of target url before fetching it. E.g. `index.html`.
+- `_sgp_md2html` : (Value ignored) Render markdown to html. If this parameter is set and the response has a content type of `text/markdown`, Simplegoproxy will convert the response body from markdown to html and set `Content-Type: text/html` response header.
 - `_sgp_salt=<value>` : The response encryption key salt.
 - `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
 - `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
@@ -306,6 +311,7 @@ The `_sgp_tplmode` (template mode, default to 0) is a bitwise flags integer para
 - bit 1 (`& 2`) : Use target url original response body as template. In this case, the `_sgp_resbody` is not mandatory required; it will instead serve as `Res.Body` context variable.
 - bit 2 (`& 4`) : Do not read target url original response body prior renderring. The `Res.Body` context variable will be raw `io.ReadCloser` in this case.
 - bit 3 (`& 8`) : Always do response template no matter of target url path suffix or response content type.
+- bit 3 (`& 16`) : Keep the content-type of original response unchanged.
 
 Template example:
 
@@ -361,6 +367,16 @@ If `-enable-unix`, `-enable-file`, `-enable-rclone` or `-enable-exec` flag is se
 For `rclone://`, `curl+*//`, `exec://` urls, if `_sgp_debug` modification parameter is set, it will output the combined stdout and stderr of spawned child process, instead of stdout only.
 
 Note some `_sgp_*` modification parameters don't work with most of above schemes urls, obviously the ones that modify http request.
+
+### Aliases
+
+Simplegoproxy supports url "alias" using `-alias <prefix>=<path>` flag. E.g.:
+
+```
+simplegoproxy -alias "/test/=/_sgp_cors=1/https://ipinfo.io/"
+```
+
+Then these two entrypoint urls will be equalvalent: `http://localhost:8380/test/` and `http://localhost:8380/_sgp_cors=1/https://ipinfo.io/`. Multiple aliases can be provided.
 
 ## Security features
 

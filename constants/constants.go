@@ -8,6 +8,7 @@ const DEFAULT_MIME = "application/octet-stream"
 const MIME_TXT = "text/plain; charset=utf-8"
 const MIME_HTML = "text/html; charset=utf-8"
 const MEDIATYPE_HTML = "text/html"
+const MEDIATYPE_MD = "text/markdown"
 
 const LINE_BREAKS = "\r\n"
 
