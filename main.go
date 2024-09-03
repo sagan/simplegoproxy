@@ -188,11 +188,7 @@ func main() {
 				return
 			}
 		}
-		if strings.HasPrefix(r.URL.Path, flags.Rootpath) {
-			if r.URL.Path == flags.Rootpath {
-				http.Redirect(w, r, flags.Adminpath, http.StatusTemporaryRedirect)
-				return
-			}
+		if len(r.URL.Path) > len(flags.Rootpath) && strings.HasPrefix(r.URL.Path, flags.Rootpath) {
 			proxyHandle.ServeHTTP(w, r)
 			return
 		}

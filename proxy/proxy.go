@@ -55,6 +55,7 @@ const (
 	USER_STRING            = "user"
 	AUTH_STRING            = "auth" // entrypoint url http authorization, username:password
 	FDHEADERS_STRING       = "fdheaders"
+	MUTESTATUS_STRING      = "mutestatus"
 	BODY_STRING            = "body"
 	RESBODY_STRING         = "resbody"
 	RESBODYTYPE_STRING     = "resbodytype"
@@ -87,6 +88,8 @@ const (
 
 // These params do not participate in url signing, sign, keytype, salt.
 var NoSignParameters = []string{SIGN_STRING, KEYTYPE_STRING, SALT_STRING}
+
+var errNotFound = fmt.Errorf("404 not found")
 
 type Template interface {
 	Execute(wr io.Writer, data any) error
@@ -267,7 +270,11 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist,
 		openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrlPath, authenticator, inalias, doLog)
 	if err != nil {
-		sendError(w, r, supressError || encryltedUrlPath != "", doLog, "Failed to fetch url: %v", err)
+		if err == errNotFound {
+			sendError(w, r, true, doLog, "backend returns 404 not found")
+		} else {
+			sendError(w, r, supressError || encryltedUrlPath != "", doLog, "Failed to fetch url: %v", err)
+		}
 		return
 	}
 	if response.Body != nil {
@@ -360,6 +367,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	// Mediatypes, if response has any of content type, do template. e.g. "txt" or "text/plain".
 	// Could be a ["*"] single element slice to allow all.
 	var tpltypes []string
+	var mutestatus []string // mute original http response of these status codes.
 	// Do subs for these content-types. could be a ["*"] single element slice to allow all.
 	var subtypes []string
 	now := time.Now().Unix()
@@ -414,6 +422,12 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 					break
 				}
 				tpltypes = append(tpltypes, util.MediaType(util.ContentType(value)))
+			}
+		case MUTESTATUS_STRING:
+			for _, value := range values {
+				if value != "" {
+					mutestatus = append(mutestatus, value)
+				}
 			}
 		case SUBTYPE_STRING:
 			for _, value := range values {
@@ -752,6 +766,36 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		})
 		if err != nil {
 			return res, err
+		}
+	}
+
+	if len(mutestatus) > 0 {
+		mute := false
+	loop:
+		for _, ms := range mutestatus {
+			switch {
+			case ms == "*":
+				if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
+					mute = true
+					break loop
+				}
+			case strings.HasPrefix(ms, "!"):
+				if s, err := strconv.Atoi(ms[1:]); err == nil && res.StatusCode != s {
+					mute = true
+					break loop
+				}
+			default:
+				if s, err := strconv.Atoi(ms); err == nil && res.StatusCode == s {
+					mute = true
+					break loop
+				}
+			}
+		}
+		if mute {
+			if res.Body != nil {
+				res.Body.Close()
+			}
+			return nil, errNotFound
 		}
 	}
 

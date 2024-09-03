@@ -194,8 +194,12 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_respass=<value>` : The password to encrypt the response. See below "Response encrpytion" section.
 - `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
 - `_sgp_tplmode=1` : The response template mode, bitwise flags integer. See below "Response template" section.
-- `_sgp_tplpath=<value>`: Apply response template only if target url path ends with this value. E.g. `.gohtml`. Can be set multiple times.
-- `_sgp_tpltype=<value>`: Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
+- `_sgp_tplpath=<value>` : Apply response template only if target url path ends with this value. E.g. `.gohtml`. Can be set multiple times.
+- `_sgp_tpltype=<value>` : Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
+- `_sgp_mutestatus=<value>` : If the target url original response has this status code, "mute" this response and sent a standard 404 not found page to client instead. Can be set multiple times. Possible values:
+  - `*` : All status codes except `200` and `206`.
+  - `!xxx` : All non-xxx status codes. E.g. `!200`.
+  - `xxx` : A specific status code. E.g. `404`.
 - `_sgp_indexfile=<value>` : If this parameter is set and the current target url ends with `/`, Simplegoproxy will append this parameter to the end of target url before fetching it. E.g. `index.html`.
 - `_sgp_md2html` : (Value ignored) Render markdown to html. If this parameter is set and the response has a content type of `text/markdown`, Simplegoproxy will convert the response body from markdown to html and set `Content-Type: text/html` response header.
 - `_sgp_salt=<value>` : The response encryption key salt.

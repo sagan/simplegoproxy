@@ -377,6 +377,12 @@ export default function Home({}) {
               >
                 tpltype
               </option>
+              <option
+                value="mutestatus"
+                title="Mute target url original response if it has this status code, '*' means all non-OK"
+              >
+                mutestatus
+              </option>
               <option title="proxy=socks5://1.2.3.4:1080" value="proxy">
                 proxy
               </option>
