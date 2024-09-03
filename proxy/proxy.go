@@ -109,7 +109,24 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	openNormal, supressError, doLog bool, enableUnix, enableFile, enableRclone, enableCurl, enableExec bool,
 	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD, authenticator *auth.Auth) {
 	defer r.Body.Close()
+	// in alias mode, url is treated as if signed, but mod params can not exists in  query variable
+	var inalias = false
+	if r.URL.Fragment != "" {
+		for _, flag := range util.SplitCsv(r.URL.Fragment) {
+			switch flag {
+			case constants.REQ_INALIAS:
+				inalias = true
+			}
+		}
+	}
 	srcUrlQuery := r.URL.Query()
+	if inalias {
+		for key := range srcUrlQuery {
+			if strings.HasPrefix(key, prefix) {
+				srcUrlQuery.Del(key)
+			}
+		}
+	}
 	reqUrlQuery := srcUrlQuery
 	targetUrl := r.URL.EscapedPath()
 	// If in encrypted url mode, the original encrypted url
@@ -247,8 +264,8 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 			return
 		}
 	}
-	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key,
-		keytypeBlacklist, openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrlPath, authenticator, doLog)
+	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist,
+		openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrlPath, authenticator, inalias, doLog)
 	if err != nil {
 		sendError(w, r, supressError || encryltedUrlPath != "", doLog, "Failed to fetch url: %v", err)
 		return
@@ -269,21 +286,23 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 
 func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, prefix, signkey string, keytypeBlacklist,
 	openScopes []string, openNormal bool, rcloneBinary, rcloneConfig, encryltedUrlPath string, authenticator *auth.Auth,
-	doLog bool) (*http.Response, error) {
+	inalias, doLog bool) (*http.Response, error) {
 	originalUrlObj := *urlObj
 	isSigned := queryParams.Get(SIGN_STRING) != ""
-	if isSigned && signkey == "" {
-		return nil, fmt.Errorf("url is signed but signkey is not set")
-	}
-	if !isSigned && signkey != "" {
-		open := false
-		if openNormal && (urlObj.Scheme == "data" || urlObj.Scheme == "http" || urlObj.Scheme == "https") {
-			open = true
-		} else if urlObj.Scheme != "data" && util.MatchUrlPatterns(openScopes, urlObj.String(), false) {
-			open = true
+	if !inalias || isSigned {
+		if isSigned && signkey == "" {
+			return nil, fmt.Errorf("url is signed but signkey is not set")
 		}
-		if !open {
-			return nil, fmt.Errorf(`sign is required but not found`)
+		if !isSigned && signkey != "" {
+			open := false
+			if openNormal && (urlObj.Scheme == "data" || urlObj.Scheme == "http" || urlObj.Scheme == "https") {
+				open = true
+			} else if urlObj.Scheme != "data" && util.MatchUrlPatterns(openScopes, urlObj.String(), false) {
+				open = true
+			}
+			if !open {
+				return nil, fmt.Errorf(`sign is required but not found`)
+			}
 		}
 	}
 
@@ -347,7 +366,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	for key := range queryParams {
 		var values []string
 		values = append(values, queryParams[key]...)
-		if isSigned && !slices.Contains(NoSignParameters, key) {
+		if (isSigned || inalias) && !slices.Contains(NoSignParameters, key) {
 			for i := range values {
 				values[i] = applyEnv(values[i])
 			}
@@ -602,7 +621,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if !hmac.Equal(messageMAC, expectedMAC) {
 			return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
 		}
-		isSigned = true
 	}
 
 	if urlObj.Scheme != "data" {
@@ -881,14 +899,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 					},
 				}
 				if usehtml {
-					if isSigned {
+					if isSigned || inalias {
 						tpl, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
 							Parse(contents)
 					} else {
 						tpl, err = htmlTemplate.New("template").Funcs(funcs).Parse(contents)
 					}
 				} else {
-					if isSigned {
+					if isSigned || inalias {
 						tpl, err = template.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
 							Parse(contents)
 					} else {
@@ -1060,6 +1078,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				hash := sha256.New()
 				hash.Write(body)
 				sha256hash := hash.Sum(nil)
+				data["body_length"] = len(body)
 				data["body_sha256"] = hex.EncodeToString(sha256hash)
 				metaJson, err := json.Marshal(data)
 				if err != nil {

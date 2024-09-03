@@ -26,7 +26,7 @@ TOC
   - [Admin UI](#admin-ui)
   - ["data:" urls](#data-urls)
   - [`unix://`, `file://`, `rclone://`, `curl+*//`, `exec://` urls](#unix-file-rclone-curl-exec-urls)
-  - [Aliases](#aliases)
+  - [URL Aliases](#url-aliases)
 - [Security features](#security-features)
   - [Set the rootpath](#set-the-rootpath)
   - [Request signing](#request-signing)
@@ -58,8 +58,10 @@ Command-line flag arguments:
 ```
   -addr string
         Http listening addr, e.g. "127.0.0.1:8380" or ":8380". If not set, will listen on "0.0.0.0:8380" (default "0.0.0.0:8380")
+  -adminpath string
+        Admin UI path. Default is <rootpath> + "admin/"
   -alias value
-        Aliases. Array List. Each one format: "name=path"
+        Aliases. Array List. Each one format: "prefix=path"
   -basic-auth
         Make admin UI use http basic authentication. If not set, it uses Digest authentication (more secure)
   -cors
@@ -68,8 +70,6 @@ Command-line flag arguments:
         Curl binary path (default "curl")
   -eid string
         Used with "-sign -encrypt". Encrypted url id, it will appear at the start of generated encrypted entrypoint utl
-  -enable-all
-        Enable all schemes url: unix & file & rclone & curl & exec
   -enable-curl
         Enable "curl+*" scheme url: "curl+https://ipinfo.io"
   -enable-exec
@@ -100,6 +100,8 @@ Command-line flag arguments:
         Password of admin UI. If not set, the "key" will be used
   -prefix string
         Prefix of settings in query parameters (default "_sgp_")
+  -prod
+        Production mode: enable all schemes, supress error, force signing
   -publicurl string
         Public url of this service. Used with "-sign". E.g. "https://sgp.example.com/". If set, will output the full generated entrypoint url instead of sign
   -rclone-binary string
@@ -113,7 +115,7 @@ Command-line flag arguments:
   -supress-error
         Supress error display, send a 404 to client instead
   -user string
-        Username of admin UI (Admin UI is available at "/admin" path) (default "root")
+        Username of admin UI (Admin UI is available at "adminpath") (default "root")
 ```
 
 All arguments are optional, and can also be set by environment variable. The environment variable name is the `SGP_` prefix concating flag name in uppercase and replacing `-` with `_`. E.g.: `enable-file` flag can be set by setting `SGP_ENABLE_FILE=true` env. For the array list type flags like `-open-scope`, the env value should be all array item values joined by `;`.
@@ -327,7 +329,7 @@ city: {{ $x.Data.city }}
 
 ### Admin UI
 
-Simplegoproxy provides a http admin UI at `/admin/` path, e.g. `http://localhost:8380/admin/` . The admin UI allow users to generate entrypoint url for a target url and view history records of generated entrypoint urls. All data are stored in the browser local storage.
+Simplegoproxy provides a http admin UI at `<rootpath>` + `/admin/` path by default, e.g. `http://localhost:8380/admin/`, use `-adminpath` flag to change the admin UI path. The admin UI allow users to generate entrypoint url for a target url and view history records of generated entrypoint urls. All data are stored in the browser local storage.
 
 ### "data:" urls
 
@@ -347,7 +349,7 @@ Both of above entrypoint urls will output "Hello, World!". The later one will al
 
 By default, Simplegoproxy only supports `http(s)` and `data` scheme urls.
 
-If `-enable-unix`, `-enable-file`, `-enable-rclone` or `-enable-exec` flag is set, Simplegoproxy will support some additional schemes of urls respectively. If `-enable-all` flag is set, all these schemes will be enabled.
+If `-enable-unix`, `-enable-file`, `-enable-rclone` or `-enable-exec` flag is set, Simplegoproxy will support some additional schemes of urls respectively.
 
 - `-enable-unix` : Make Simplegoproxy supports URLs of http(s) over unix domain socket in local file system. Target url example: `unix://path/to/socket:http://server/path`. Use `:` to split http resource url with the unix domain socket file path.
 - `-enable-file` : Make Simplegoproxy supports `file://` ([File URI scheme](https://en.wikipedia.org/wiki/File_URI_scheme)) urls, which reference to local file system files. Directory Index is also supported. Target url examples:
@@ -368,15 +370,20 @@ For `rclone://`, `curl+*//`, `exec://` urls, if `_sgp_debug` modification parame
 
 Note some `_sgp_*` modification parameters don't work with most of above schemes urls, obviously the ones that modify http request.
 
-### Aliases
+### URL Aliases
 
-Simplegoproxy supports url "alias" using `-alias <prefix>=<path>` flag. E.g.:
+Simplegoproxy supports url "alias" using `-alias <prefix>=<path>` flag. It can be set multiple times. The `<prefix>` part is the path of the entrypoint url, it doesn't need to start with the "rootpath". The `<path>` part consists of the fronting modification parameters and the prefix of target url. E.g.:
 
 ```
 simplegoproxy -alias "/test/=/_sgp_cors=1/https://ipinfo.io/"
 ```
 
-Then these two entrypoint urls will be equalvalent: `http://localhost:8380/test/` and `http://localhost:8380/_sgp_cors=1/https://ipinfo.io/`. Multiple aliases can be provided.
+Then the following "alias" entrypoint urls will be equalvalent to non-alias ones:
+
+- `http://localhost:8380/test/` => `http://localhost:8380/_sgp_cors=1/https://ipinfo.io/`.
+- `http://localhost:8380/test/ip` => `http://localhost:8380/_sgp_cors=1/https://ipinfo.io/ip`.
+
+The "alias" entrypoint urls do not require explicit signing and always treated as already signed (That's say, `_sgp_sign` parameter is not required). However, all modification parameters must be inside the alias `<prefix>` part and can not exist in the URL query variable.
 
 ## Security features
 
@@ -502,15 +509,7 @@ When request signing is used, you can define some "open scopes" using `-open-sco
 -open-scope "http://example.com/*"
 ```
 
-This flag can be set multiple times. Target urls of these scopes do not require (enforce) signing. However, env substitutions do not work if a such scope url is not signed. Some flags can also be used to make certain urls do not require signing:
-
-- `-open-normal`: Make all `http`, `https` and `data` scheme urls do not require signing.
-
-Example:
-
-```
-simplegoproxy -enable-all -key abc -open-normal
-```
+This flag can be set multiple times. Target urls of these scopes do not require (enforce) signing. However, env substitutions do not work if a such scope url is not signed. The `-open-normal` flag can be used to make all `http`, `https` and `data` scheme urls do not require signing.
 
 ### URL encryption
 
@@ -538,10 +537,11 @@ By default it uses [basic access authentication](https://en.wikipedia.org/wiki/B
 
 If "URL encryption" is used and the `_sgp_respass=<value>` parameter is set, Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (by default no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`.
 
-By default, the http response will always has `200` status with only three http headers: `Content-Type: text/plain` and `Content-Length`; Along with the `X-Encryption-Meta` header, which is the encrypted base64 string of the json object `{status, header, body_sha256, date, encrypted_url, request_query, source_addr}`:
+By default, the http response will always has `200` status with only three http headers: `Content-Type: text/plain` and `Content-Length`; Along with the `X-Encryption-Meta` header, which is the encrypted base64 string of the json object `{status, header, body_length, body_sha256, date, encrypted_url, request_query, source_addr}`:
 
 - `status` : (number) The original http response status code. E.g. `200`.
 - `header` : (object) The original http response header.
+- `body_length` : (number) The body (prior base64) length.
 - `body_sha256` : (string) The sha256 of (encrypted) response body.
 - `date` : (string) The server date time when response is sent back to client. E.g. `2006-01-02T15:04:05Z`.
 - `encrpyted_url` : (string) The original encrypted url that Simplegoproxy server received.
@@ -552,7 +552,7 @@ The `_sgp_encmode` (encryption mode, default to 0) is a bitwise flags integer pa
 
 - bit 0 (`& 1`): Make the response body be binary data instead of base64 string.
 - bit 1 (`& 2`) : Make only response body be encrypted: response header not protected.
-- bit 2 (`& 4`) : Make the response body be encrypted data of the a JSON object which has the same structure as above `X-Encryption-Meta` header, plus some additional fields: `body`, `body_encoding`. The `body_encoding` indicates the encoding method of `body`, possibly values: empty string, `base64`.
+- bit 2 (`& 4`) : Make the response body be encrypted data of the a JSON object which has the same structure as above `X-Encryption-Meta` header (without `body_length` and `body_sha256`), plus two string type fields: `body`, `body_encoding`. The `body_encoding` indicates the encoding method of `body`, possibly values: empty string, `base64`.
 - bit 3 (`& 8`) : Used with bit 2 set. Force json "body" field to be original http rersonse string.
 - bit 4 (`& 16`) : Used with bit 2 set. Force json "body" field to be base64 string of original http rersonse.
 

@@ -35,12 +35,16 @@ func main() {
 	if regexp.MustCompile(`^\d+$`).MatchString(flags.Addr) {
 		flags.Addr = ":" + flags.Addr
 	}
-	if flags.EnableAll {
+	if flags.Prod {
 		flags.EnableUnix = true
 		flags.EnableFile = true
 		flags.EnableRclone = true
 		flags.EnableCurl = true
 		flags.EnableExec = true
+		flags.SupressError = true
+		if flags.Key == "" {
+			log.Fatalf("key must be set in production mode")
+		}
 	}
 	if flags.Key == "" && (flags.OpenNormal || len(flags.OpenScopes) > 0) {
 		log.Fatalf(`The "open-normal" and "open-scope" flags must be used with "key" flag`)
@@ -50,12 +54,7 @@ func main() {
 	if strings.ContainsAny(flags.Key, constants.LINE_BREAKS) {
 		log.Fatalf(`The "key" flag can not contains line breaks`)
 	}
-	if !strings.HasPrefix(flags.Rootpath, "/") {
-		flags.Rootpath = "/" + flags.Rootpath
-	}
-	if !strings.HasSuffix(flags.Rootpath, "/") {
-		flags.Rootpath += "/"
-	}
+	flags.Rootpath = normalizeUrlPath(flags.Rootpath)
 	flags.KeytypeBlacklist = util.SplitCsv(flags.KeytypeBlacklistStr)
 	if flags.Key != "" {
 		if flags.Cipher, err = util.GetCipher(flags.Key, ""); err != nil {
@@ -111,6 +110,11 @@ func main() {
 		}
 		return
 	}
+	if flags.Adminpath == "" {
+		flags.Adminpath = flags.Rootpath + "admin/"
+	} else {
+		flags.Adminpath = normalizeUrlPath(flags.Adminpath)
+	}
 
 	// [][prefix, path]. longest prefix first.
 	// prefix & path always starts and ends with "/".
@@ -121,31 +125,20 @@ func main() {
 		if !found || prefix == "" || path == "" {
 			log.Fatalf("invalid alias %q", a)
 		}
-		if !strings.HasPrefix(prefix, "/") {
-			prefix = "/" + prefix
-		}
-		if !strings.HasSuffix(prefix, "/") {
-			prefix += "/"
-		}
-		if !strings.HasPrefix(path, "/") {
-			path = "/" + path
-		}
-		if !strings.HasSuffix(path, "/") {
-			path += "/"
-		}
+		prefix = normalizeUrlPath(prefix)
+		path = normalizeUrlPath(path)
 		aliases = append(aliases, [2]string{prefix, path})
 	}
 	slices.SortFunc(aliases, func(a, b [2]string) int { return len(b[0]) - len(a[0]) })
 
-	adminPath := flags.Rootpath + "admin/"
-	fmt.Printf("simplegoproxy %s starts on %s, rootpath=%s, prefix=%s, signing_enabled(key_set)=%t\n",
-		version.Version, flags.Addr, flags.Rootpath, flags.Prefix, flags.Key != "")
+	fmt.Printf("simplegoproxy %s starts on %s, rootpath=%s, prefix=%s, signing_enabled(key_set)=%t, supress_error=%t\n",
+		version.Version, flags.Addr, flags.Rootpath, flags.Prefix, flags.Key != "", flags.SupressError)
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
 	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t, curl=%t, exec=%t\n",
 		flags.EnableFile, flags.EnableUnix, flags.EnableRclone, flags.EnableCurl, flags.EnableExec)
 	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(constants.TextualMediatypes, ", "))
 	fmt.Printf("Blacklist keytypes: %v\n", flags.KeytypeBlacklist)
-	fmt.Printf("Admin Web UI at %q with user/pass: %s:***\n", adminPath, flags.User)
+	fmt.Printf("Admin Web UI at %q with user/pass: %s:***\n", flags.Adminpath, flags.User)
 	if len(flags.OpenScopes) > 0 {
 		fmt.Printf("Open scopes: %v\n", flags.OpenScopes)
 	}
@@ -166,10 +159,12 @@ func main() {
 			flags.SupressError, flags.Log, flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl,
 			flags.EnableExec, flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher, authenticator)
 	}))
-	adminHandle := http.StripPrefix(adminPath, admin.GetHttpHandle())
+	adminHandle := http.StripPrefix(flags.Adminpath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244
 	err = http.ListenAndServe(flags.Addr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, adminPath) {
+		// We use fragment as a internal context flags holder. So make sure it's firstly cleared.
+		r.URL.Fragment = ""
+		if strings.HasPrefix(r.URL.Path, flags.Adminpath) {
 			adminHandle.ServeHTTP(w, r)
 			return
 		}
@@ -188,13 +183,14 @@ func main() {
 				*r2.URL = *r.URL
 				r2.URL.Path = alias[1] + p
 				r2.URL.RawPath = alias[1] + rp
+				r2.URL.Fragment = constants.REQ_INALIAS
 				proxyHandle.ServeHTTP(w, r2)
 				return
 			}
 		}
 		if strings.HasPrefix(r.URL.Path, flags.Rootpath) {
 			if r.URL.Path == flags.Rootpath {
-				http.Redirect(w, r, flags.Rootpath+"admin/", http.StatusTemporaryRedirect)
+				http.Redirect(w, r, flags.Adminpath, http.StatusTemporaryRedirect)
 				return
 			}
 			proxyHandle.ServeHTTP(w, r)
@@ -203,4 +199,20 @@ func main() {
 		http.NotFound(w, r)
 	}))
 	log.Fatalf("Failed to start http server: %v", err)
+}
+
+// Normalize a url path:
+// 1. Unescape.
+// 2. Make sure path starts and ends with "/".
+func normalizeUrlPath(path string) string {
+	if p, err := url.PathUnescape(path); err == nil {
+		path = p
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+	return path
 }

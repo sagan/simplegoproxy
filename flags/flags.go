@@ -27,13 +27,14 @@ var (
 	EnableRclone        bool
 	EnableCurl          bool
 	EnableExec          bool
-	EnableAll           bool
+	Prod                bool
 	OpenNormal          bool
 	SupressError        bool
 	RcloneBinary        string
 	RcloneConfig        string
 	CurlBinary          string
 	Rootpath            string
+	Adminpath           string
 	Prefix              string
 	Eid                 string
 	Key                 string
@@ -74,7 +75,7 @@ func init() {
 	flag.BoolVar(&EnableRclone, "enable-rclone", false, `Enable rclone scheme url: "rclone://remote/path/to/file"`)
 	flag.BoolVar(&EnableExec, "enable-exec", false, `Enable exec scheme url: "exec:///path/to/bin?arg=foo&arg=bar"`)
 	flag.BoolVar(&EnableCurl, "enable-curl", false, `Enable "curl+*" scheme url: "curl+https://ipinfo.io"`)
-	flag.BoolVar(&EnableAll, "enable-all", false, `Enable all schemes url: unix & file & rclone & curl & exec`)
+	flag.BoolVar(&Prod, "prod", false, `Production mode: enable all schemes, supress error, force signing`)
 	flag.BoolVar(&OpenNormal, "open-normal", false, `Used with request signing, make all "http(s)" and "data" urls do not require signing`)
 	flag.BoolVar(&Cors, "cors", false, `Set "Access-Control-Allow-Origin: *" header for admin API`)
 	flag.BoolVar(&BasicAuth, "basic-auth", false,
@@ -87,11 +88,12 @@ func init() {
 	flag.StringVar(&CurlBinary, "curl-binary", "curl", "Curl binary path")
 	flag.StringVar(&RcloneConfig, "rclone-config", "", "Manually specify rclone config file path")
 	flag.StringVar(&Rootpath, "rootpath", "/", "Root path (with leading and trailing slash)")
+	flag.StringVar(&Adminpath, "adminpath", "", `Admin UI path. Default is <rootpath> + "admin/"`)
 	flag.StringVar(&PublicUrl, "publicurl", "",
 		`Public url of this service. Used with "-sign". E.g. "https://sgp.example.com/". `+
 			`If set, will output the full generated entrypoint url instead of sign`)
 	flag.StringVar(&Prefix, "prefix", "_sgp_", "Prefix of settings in query parameters")
-	flag.StringVar(&User, "user", "root", `Username of admin UI (Admin UI is available at "/admin" path)`)
+	flag.StringVar(&User, "user", "root", `Username of admin UI (Admin UI is available at "adminpath")`)
 	flag.StringVar(&Pass, "pass", "", `Password of admin UI. If not set, the "key" will be used`)
 	flag.StringVar(&Key, "key", "", "The sign key. If set, all requests must be signed using HMAC(key, 'sha-256', payload=url), providing calculated MAC (hex string) in _sgp_sign")
 	flag.StringVar(&Keytype, "keytype", "", `The sign keytype. Used with "-sign"`)

@@ -12,6 +12,9 @@ const MEDIATYPE_MD = "text/markdown"
 
 const LINE_BREAKS = "\r\n"
 
+// Current request is a alias parsed url
+const REQ_INALIAS = "inalias"
+
 // seconds of 100 years, aka: infinite.
 const INFINITE_TIMEOUT = 86400 * 365 * 100
 
