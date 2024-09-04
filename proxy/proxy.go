@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -56,6 +57,8 @@ const (
 	AUTH_STRING            = "auth" // entrypoint url http authorization, username:password
 	FDHEADERS_STRING       = "fdheaders"
 	MUTESTATUS_STRING      = "mutestatus"
+	MUTETYPE_STRING        = "mutetype"
+	MUTEPATH_STRING        = "mutepath"
 	BODY_STRING            = "body"
 	RESBODY_STRING         = "resbody"
 	RESBODYTYPE_STRING     = "resbodytype"
@@ -82,6 +85,7 @@ const (
 	DEBUG_STRING           = "debug"
 	EPATH_STRING           = "epath" // allow subpath in encrypted url
 	SALT_STRING            = "salt"
+	FLAG_STRING            = "flag"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
 )
@@ -342,7 +346,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	cookie := ""
 	user := ""
 	authuser := ""
-	fdheaders := ""
 	body := ""
 	forwardBody := false
 	templateContents := ""
@@ -359,6 +362,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	indexfile := ""
 	// password to encrypt final response body to client
 	var respass = ""
+	var fdheaders []string
 	var scopes []string
 	var referers []string
 	var origines []string
@@ -367,9 +371,18 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	// Mediatypes, if response has any of content type, do template. e.g. "txt" or "text/plain".
 	// Could be a ["*"] single element slice to allow all.
 	var tpltypes []string
+	var mutepathes []string // do not sent request to target url server if url path ends with this.
 	var mutestatus []string // mute original http response of these status codes.
+	var mutetypes []string  // mute original http response of these content types
 	// Do subs for these content-types. could be a ["*"] single element slice to allow all.
 	var subtypes []string
+	// bitwise flags. bit 0: don't parse each value of array values as csv
+	var sgpflag = 0
+	if f := queryParams.Get(FLAG_STRING); f != "" {
+		if sgpflag, err = strconv.Atoi(f); err != nil || sgpflag < 0 {
+			return nil, fmt.Errorf("invalid flag: %v", err)
+		}
+	}
 	now := time.Now().Unix()
 	for key := range queryParams {
 		var values []string
@@ -381,6 +394,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 		value := values[0]
 		switch key {
+		case FLAG_STRING, EID_STRING, EPATH_STRING, ARG_SRING, ARGS_SRING:
+			// do nothing
 		case TPLMODE_STRING:
 			tplmode, err = strconv.Atoi(value)
 			if err != nil || tplmode < 0 {
@@ -396,47 +411,30 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			if err != nil || authmode < 0 {
 				return nil, fmt.Errorf("invalid authmode: %v", err)
 			}
-		case EID_STRING, EPATH_STRING, ARG_SRING, ARGS_SRING:
-			// do nothing
 		case STATUS_STRING:
 			status, err = strconv.Atoi(value)
 			if err != nil || (status != 0 && status != -1 && (status < 100 || status > 599)) {
 				return nil, fmt.Errorf("invalid status %q: %v", value, err)
 			}
 		case TPLPATH_STRING:
-			for _, value := range values {
-				if value != "" {
-					tplpathes = append(tplpathes, value)
-				}
-			}
+			tplpathes = parseArrayParameters(sgpflag, values, false, nil)
 		case SUBPATH_STRING:
-			for _, value := range values {
-				if value != "" {
-					subpathes = append(subpathes, value)
-				}
-			}
+			subpathes = parseArrayParameters(sgpflag, values, false, nil)
 		case TPLTYPE_STRING:
-			for _, value := range values {
-				if value == "*" {
-					tpltypes = []string{"*"}
-					break
-				}
-				tpltypes = append(tpltypes, util.MediaType(util.ContentType(value)))
-			}
+			tpltypes = parseArrayParameters(sgpflag, values, false, normalizeTypeParameter)
 		case MUTESTATUS_STRING:
-			for _, value := range values {
-				if value != "" {
-					mutestatus = append(mutestatus, value)
+			mutestatus = parseArrayParameters(sgpflag, values, false, nil)
+		case MUTEPATH_STRING:
+			mutepathes = parseArrayParameters(sgpflag, values, false, nil)
+		case MUTETYPE_STRING:
+			mutetypes = parseArrayParameters(sgpflag, values, true, func(typ string) string {
+				if strings.HasPrefix(typ, "!") {
+					return "!" + normalizeTypeParameter(typ[1:])
 				}
-			}
+				return normalizeTypeParameter(typ)
+			})
 		case SUBTYPE_STRING:
-			for _, value := range values {
-				if value == "*" {
-					subtypes = []string{"*"}
-					break
-				}
-				subtypes = append(subtypes, util.MediaType(util.ContentType(value)))
-			}
+			subtypes = parseArrayParameters(sgpflag, values, false, normalizeTypeParameter)
 		case SALT_STRING:
 			salt = value
 		case INDEXFILE_STRING:
@@ -477,7 +475,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		case METHOD_STRING:
 			method = strings.ToUpper(value)
 		case FDHEADERS_STRING:
-			fdheaders = value
+			fdheaders = parseArrayParameters(sgpflag, values, false, nil)
 		case BODY_STRING:
 			body = value
 		case RESBODY_STRING:
@@ -494,15 +492,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			}
 			keytype = value
 		case SCOPE_STRING:
-			for _, value := range values {
-				if value != "" {
-					scopes = append(scopes, value)
-				}
-			}
+			scopes = parseArrayParameters(sgpflag, values, false, nil)
 		case REFERER_STRING:
-			referers = append(referers, values...)
+			referers = parseArrayParameters(sgpflag, values, true, nil)
 		case ORIGIN_STRING:
-			origines = append(origines, values...)
+			origines = parseArrayParameters(sgpflag, values, true, nil)
 		case VALIDBEFORE_STRING:
 			if validbefore, err := util.ParseLocalDateTime(value); err != nil {
 				return nil, fmt.Errorf("invalid validbefore: %v", err)
@@ -587,10 +581,10 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 		responseMediaType = util.MediaType(responseContentType)
 	}
-	if len(referers) > 0 && !util.MatchUrlPatterns(referers, srcReq.Header.Get("Referer"), true) {
+	if len(referers) > 0 && referers[0] != "*" && !util.MatchUrlPatterns(referers, srcReq.Header.Get("Referer"), true) {
 		return nil, fmt.Errorf("invalid referer '%s', allowed referers: %v", srcReq.Header.Get("Referer"), referers)
 	}
-	if len(origines) > 0 && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
+	if len(origines) > 0 && origines[0] != "*" && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
 	}
 
@@ -616,8 +610,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			}
 			urlObj.RawQuery = targetUrlQuery.Encode()
 			signUrl = "?" + signUrlQuery.Encode()
-			if targetUrl := urlObj.String(); !util.MatchUrlPatterns(scopes, targetUrl, false) {
-				return nil, fmt.Errorf(`invalid url %s for scopes %v`, targetUrl, scopes)
+			match := false
+			if scopes[0] == "*" {
+				match = urlObj.Scheme == "http" || urlObj.Scheme == "https"
+			} else {
+				match = util.MatchUrlPatterns(scopes, urlObj.String(), false)
+			}
+			if !match {
+				return nil, fmt.Errorf(`invalid url %s for scopes %v`, urlObj, scopes)
 			}
 		}
 		if keytype != "" {
@@ -653,15 +653,16 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 		forwardHeaders := []string{"If-Match", "If-Modified-Since", "If-None-Match", "If-Range",
 			"If-Unmodified-Since", "Range"}
-		if fdheaders != "" {
-			if fdheaders == "*" {
+		for _, fdheader := range fdheaders {
+			switch fdheader {
+			case "\n":
+				forwardHeaders = nil
+			case "*":
 				for h := range srcReq.Header {
 					forwardHeaders = append(forwardHeaders, h)
 				}
-			} else if fdheaders == "\n" {
-				forwardHeaders = nil
-			} else {
-				forwardHeaders = append(forwardHeaders, strings.Split(fdheaders, ",")...)
+			default:
+				forwardHeaders = append(forwardHeaders, fdheader)
 			}
 		}
 		for _, h := range forwardHeaders {
@@ -711,6 +712,31 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				log.Printf("Auth failed: %v", err)
 			}
 			return errres, nil
+		}
+	}
+
+	if len(mutepathes) > 0 {
+		mute := func() bool {
+			for _, mp := range mutepathes {
+				switch {
+				case mp == "*":
+					if strings.HasSuffix(effectiveUrlPath, "/") || path.Ext(effectiveUrlPath) != "" {
+						return true
+					}
+				case strings.HasPrefix(mp, "!"):
+					if !strings.HasSuffix(effectiveUrlPath, mp[1:]) {
+						return true
+					}
+				default:
+					if strings.HasSuffix(effectiveUrlPath, mp) {
+						return true
+					}
+				}
+			}
+			return false
+		}()
+		if mute {
+			return nil, errNotFound
 		}
 	}
 
@@ -768,38 +794,59 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			return res, err
 		}
 	}
+	originalResponseMediaType := util.MediaType(res.Header.Get("Content-Type"))
 
-	if len(mutestatus) > 0 {
-		mute := false
-	loop:
-		for _, ms := range mutestatus {
-			switch {
-			case ms == "*":
-				if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-					mute = true
-					break loop
-				}
-			case strings.HasPrefix(ms, "!"):
-				if s, err := strconv.Atoi(ms[1:]); err == nil && res.StatusCode != s {
-					mute = true
-					break loop
-				}
-			default:
-				if s, err := strconv.Atoi(ms); err == nil && res.StatusCode == s {
-					mute = true
-					break loop
+	mute := false
+	if !mute && len(mutestatus) > 0 {
+		mute = func() bool {
+			for _, ms := range mutestatus {
+				switch {
+				case ms == "*":
+					if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
+						return true
+					}
+				case strings.HasPrefix(ms, "!"):
+					if s, err := strconv.Atoi(ms[1:]); err == nil && res.StatusCode != s {
+						return true
+					}
+				default:
+					if s, err := strconv.Atoi(ms); err == nil && res.StatusCode == s {
+						return true
+					}
 				}
 			}
-		}
-		if mute {
-			if res.Body != nil {
-				res.Body.Close()
+			return false
+		}()
+	}
+	if !mute && len(mutetypes) > 0 {
+		mute = func() bool {
+			for _, mt := range mutetypes {
+				switch {
+				case mt == "*":
+					if originalResponseMediaType != constants.MEDIATYPE_TXT &&
+						originalResponseMediaType != constants.MEDIATYPE_HTML {
+						return true
+					}
+				case strings.HasPrefix(mt, "!"):
+					if originalResponseMediaType != mt[1:] {
+						return true
+					}
+				default:
+					if originalResponseMediaType == mt {
+						return true
+					}
+				}
 			}
-			return nil, errNotFound
+			return false
+		}()
+	}
+	if mute {
+		if res.Body != nil {
+			res.Body.Close()
 		}
+		return nil, errNotFound
 	}
 
-	originalResponseMediaType := util.MediaType(res.Header.Get("Content-Type"))
 	res.Header.Del("Strict-Transport-Security")
 	res.Header.Del("Clear-Site-Data")
 	res.Header.Del("Set-Cookie")
@@ -855,7 +902,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if forcesub {
 			return true
 		}
-		if len(subpathes) > 0 && !slices.ContainsFunc(subpathes, func(suffix string) bool {
+		if len(subpathes) > 0 && subpathes[0] != "*" && !slices.ContainsFunc(subpathes, func(suffix string) bool {
 			return strings.HasSuffix(effectiveUrlPath, suffix)
 		}) {
 			return false
@@ -889,7 +936,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			if tplmode&8 != 0 {
 				return true
 			}
-			if len(tplpathes) > 0 && !slices.ContainsFunc(tplpathes, func(suffix string) bool {
+			if len(tplpathes) > 0 && tplpathes[0] != "*" && !slices.ContainsFunc(tplpathes, func(suffix string) bool {
 				return strings.HasSuffix(effectiveUrlPath, suffix)
 			}) {
 				return false
@@ -1381,4 +1428,36 @@ func deleteContentHeaders(header http.Header) {
 	header.Del("Content-Length")
 	header.Del("Content-Range")
 	header.Del("Content-Encoding")
+}
+
+func parseArrayParameters(sgpflag int, values []string, allowEmpty bool, mapper func(string) string) (output []string) {
+	for _, value := range values {
+		if value == "" {
+			if allowEmpty {
+				output = append(output, value)
+			}
+		} else if value == "*" {
+			return []string{value}
+		} else if sgpflag&1 != 0 {
+			output = append(output, value)
+		} else {
+			for _, v := range util.SplitCsv(value) {
+				if v != "" && mapper != nil {
+					v = mapper(v)
+				}
+				if allowEmpty || v != "" {
+					output = append(output, v)
+				}
+			}
+		}
+	}
+	return output
+}
+
+// Parse type and return mediatype.
+func normalizeTypeParameter(typ string) string {
+	if typ == "" {
+		return ""
+	}
+	return util.MediaType(util.ContentType(typ))
 }

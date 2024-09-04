@@ -378,6 +378,18 @@ export default function Home({}) {
                 tpltype
               </option>
               <option
+                value="mutetype"
+                title="Mute target url original response if it has this content-type, '*' means all but html/txt"
+              >
+                mutetype
+              </option>
+              <option
+                value="mutepath"
+                title="Do not fetch target url if it's path ends with this suffix"
+              >
+                mutepath
+              </option>
+              <option
                 value="mutestatus"
                 title="Mute target url original response if it has this status code, '*' means all non-OK"
               >

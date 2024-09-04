@@ -149,6 +149,8 @@ Access-Control-Allow-Origin: *
 
 All modification paramaters has the `_sgp_` prefix by default, which can be changed via `-prefix` command-line argument.
 
+The "Array Value" type parameters can be set multiple times; alternatively, multiple values can be put in single parameter via joining these values by `,`.
+
 - `_sgp_cors` : (Value ignored) Add the CORS-allow-all headers to original response.
 - `_sgp_nocsp` : (Value ignored) Remove the [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP) (CSP) headers from original response.
 - `_sgp_trimresheader` : (Value ignored) Remove all response headers except Content-Type/Length/Encoding/Range.
@@ -164,8 +166,8 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_sub_<string>=<replacement>` : Response body substitutions. Similar to nginx [http_sub](https://nginx.org/en/docs/http/ngx_http_sub_module.html) module. See below "Response body substitutions" section.
 - `_sgp_subr_<Regexp>=<replacement>` : Similar to `_spg_sub_*` but do regexp find and replacement.
 - `_sgp_subb_<HexString>=<replacement>` : Similar to `_spg_sub_*` but do binary bytes find and replacement.
-- `_sgp_subpath=<value>`: Apply response substitutions only if target url path ends with this value. E.g. `.html`. Can be set multiple times.
-- `_sgp_subtype=<value>`: Apply response substitutions only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
+- `_sgp_subpath=<value>`: Array Value. Apply response substitutions only if target url path ends with this value. E.g. `.html`.
+- `_sgp_subtype=<value>`: Array Value. Apply response substitutions only if target url original response has this content type. E.g. `txt`, `text/plain`. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
 - `_sgp_forcesub` : (Value ignored) Force do response body substitutions on any MIME type response.
 - `_sgp_cookie=<value>` : Set request cookie. Equivalent to `_sgp_header_cookie=<value>`.
 - `_sgp_type=<value>` : Set the request content type. Similar to `_sgp_header_Content-Type=<value>`.
@@ -176,7 +178,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_body=<value>` : Set the request body (String only. Binary data is not supported).
 - `_sgp_resbody=<value>` : Set the response body template.
 - `_sgp_resbodytype=<value>` : The original response body type, e.g. `json`, `xml`, `yaml`, `toml`.
-- `_sgp_fdheaders=<header1>,<header2>,...` : Comma-separated forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. By default some headers will ALWAYS be forwarded, even if not specified, unless the same `_sgp_header_*` parameter is set: `Range`, `If-*`. Some values have special meanings:
+- `_sgp_fdheaders=<value>` : Array Value. Forward headers list. For every header in the list, if the http request to the "entrypoint url" itself contains that header, Simplegoproxy will set the request header to the same value when making http request to the "target url". E.g.: `_sgp_fdheaders=Referer,Origin`. By default some headers will ALWAYS be forwarded, even if not specified: `Range`, `If-*`. If a `_sgp_header_*` parameter is set, it will override the same name forwarded header. Some values have special meanings:
   - `*`: ALL request headers.
   - `%0A` (\n) : Supresses default forwarding headers and makes sure no headers would be forwarded.
   - `:method` : Forward the http request method. Use the incoming method to the entrypoint url as the one sent to the target url.
@@ -185,7 +187,7 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_impersonate=<value>` : Impersonate itself as Browser when sending http request. See below "Impersonate the Browser" section.
 - `_sgp_sign=<value>` : The sign of request canonical url. See below "Request signing" section.
 - `_sgp_keytype=<value>` : The sign key type. See below "Signing key type" section.
-- `_sgp_scope=<value>` : The scope of sign. Can be used multiple times. See below "Scope signing" section.
+- `_sgp_scope=<value>` : Array Value. The scope of sign. See below "Scope signing" section.
 - `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
 - `_sgp_epath` : (Value ignored) Enable plaintext children and normal query variables for encrypted url.
 - `_sgp_status=<value>` : Force set http response status code sent back to client. E.g. `200`, `403`. Special values: `-1` - Use original http response code.
@@ -194,17 +196,23 @@ All modification paramaters has the `_sgp_` prefix by default, which can be chan
 - `_sgp_respass=<value>` : The password to encrypt the response. See below "Response encrpytion" section.
 - `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
 - `_sgp_tplmode=1` : The response template mode, bitwise flags integer. See below "Response template" section.
-- `_sgp_tplpath=<value>` : Apply response template only if target url path ends with this value. E.g. `.gohtml`. Can be set multiple times.
-- `_sgp_tpltype=<value>` : Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
-- `_sgp_mutestatus=<value>` : If the target url original response has this status code, "mute" this response and sent a standard 404 not found page to client instead. Can be set multiple times. Possible values:
+- `_sgp_tplpath=<value>` : Array Value. Apply response template only if target url path ends with this value. E.g. `.gohtml`.
+- `_sgp_tpltype=<value>` : Array Value. Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
+- `_sgp_mutestatus=<value>` : Array Value. If the target url original response has this status code, "mute" this response (discard this reponse and sent a standard 404 not found page to client instead). Possible values:
   - `*` : All status codes except `200` and `206`.
   - `!xxx` : All non-xxx status codes. E.g. `!200`.
   - `xxx` : A specific status code. E.g. `404`.
+- `_sgp_mutepath=<value>` : Array Value. If the target url path ends with this suffix, do not fetch it and sent a standard 404 not found page to client instead. The `*` means any path that ends with `/`, or the last segment of path has a file extension (containing `.` char).
+- `_sgp_mutetype=<value>` : Array Value. If the target url original response has this content type, "mute" this response. Possible values:
+  - empty string: The empty or non-present "Content-Type".
+  - `*` : All content types except `text/html` and `text/plain`.
+  - `xxx` or `xxx/xxx` : Specific content type. E.g. `txt`, `text/plain`.
+  - `!xxx` : All content types except this specific type. E.g. `!html`.
 - `_sgp_indexfile=<value>` : If this parameter is set and the current target url ends with `/`, Simplegoproxy will append this parameter to the end of target url before fetching it. E.g. `index.html`.
 - `_sgp_md2html` : (Value ignored) Render markdown to html. If this parameter is set and the response has a content type of `text/markdown`, Simplegoproxy will convert the response body from markdown to html and set `Content-Type: text/html` response header.
 - `_sgp_salt=<value>` : The response encryption key salt.
-- `_sgp_referer=<value>` : Set the allowed referer of request to the entrypoint url. Can be used multiple times. See below "Referer restrictions" section.
-- `_sgp_origin=<value>` : Set the allowed origin of request to the entrypoint url. Can be used multiple times. See below "Origin restrictions" section.
+- `_sgp_referer=<value>` : Array Value. Set the allowed referer of request to the entrypoint url. See below "Referer restrictions" section.
+- `_sgp_origin=<value>` : Array Value. Set the allowed origin of request to the entrypoint url. See below "Origin restrictions" section.
 - `_sgp_validbefore=<value>`, `_sgp_validafter=<value>` : If set, the entrypoint url can only be used before or after this time accordingly. Value can be any of below time formats: `2006-01-02`, `2006-01-02T15:04:05` `2006-01-02T15:04:05-07:00`, `2006-01-02T15:04:05Z`. All but the last format are parsed in local timezone. The last one are parsed as UTC time. Note to enforce these restrictions, "Request signing" must be enabled.
 
 Modification paramaters are set in Query Variables. All `_sgp_*` parameters are stripped from the target url when Simplegoproxy fetch it. E.g.: the `http://localhost:8380/https://ipcfg.co/json?abc=1&_sgp_cors` entry will actually fetch the `https://ipcfg.co/json?abc=1` target url.
@@ -227,8 +235,8 @@ Response body substitutions modify the original http response returned by the ta
 
 The response body substitutions is only applied when certain conditions meet. Change default behavior by setting the follow parameters:
 
-- `_sgp_subpath=<value>`: Apply substitutions only if target url path ends with this value. E.g. `.html`. Can be set multiple times. If none is set, url path suffix check is skipped.
-- `_sgp_subtype=<value>`: Apply substitutions only if target url original response has this [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types) ("Content-Type"). E.g. `txt`, `text/plain`. Can be set multiple times. Set to `*` to accept all content-types. If none is set, default behavior is to apply substitutions if the original response has a textual content type, which could be any one of the following: `text/*`, `application/json`, `application/xml`, `application/yaml`, `application/toml`, `application/atom+xml`, `application/x-sh`.
+- `_sgp_subpath=<value>`: Array Value. Apply substitutions only if target url path ends with this value. E.g. `.html`. If none is set, url path suffix check is skipped.
+- `_sgp_subtype=<value>`: Array Value. Apply substitutions only if target url original response has this [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types) ("Content-Type"). E.g. `txt`, `text/plain`. Set to `*` to accept all content-types. If none is set, default behavior is to apply substitutions if the original response has a textual content type, which could be any one of the following: `text/*`, `application/json`, `application/xml`, `application/yaml`, `application/toml`, `application/atom+xml`, `application/x-sh`.
 - `_sgp_forcesub=1`: Force do substitutions on any response, no matter of it's url path suffix or content type.
 
 To do response body substitutions, use any of the following parameters to set the find-and-replace rule(s). These parameters can be specified multiple times. Note both the needle and replacement part of the string should be url encoded.
@@ -281,8 +289,8 @@ The context (available variables):
 Notes:
 
 - The response template is only applied when certain conditions meet. Change default behavior by setting the follow parameters:
-  - `_sgp_tplpath=<value>`: Apply response template only if target url path ends with this value. E.g. `.gohtml`. Can be set multiple times. If none is set, url path suffix check is skipped.
-  - `_sgp_tpltype=<value>`: Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Can be set multiple times. Set to `*` to accept all content-types. If none is set, default behavior is to apply template if the original response has a textual "Content-Type".
+  - `_sgp_tplpath=<value>`: Array Value. Apply response template only if target url path ends with this value. E.g. `.gohtml`. If none is set, url path suffix check is skipped.
+  - `_sgp_tpltype=<value>`: Array Value. Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Set to `*` to accept all content-types. If none is set, default behavior is to apply template if the original response has a textual "Content-Type".
 - The `res.data` is by default parsed according to original http response's content-type header. You can forcibly specify the type using `_sgp_resbodytype` parameter (json / yaml / xml / toml).
 - The status of rendered response is `200` by default, use `_sgp_status` parameter to override it.
 - The "content-type" of renderred response is `text/html` by default, use `_sgp_restype` parameter to override it.
