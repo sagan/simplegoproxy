@@ -64,6 +64,8 @@ Command-line flag arguments:
         Aliases. Array List. Each one format: "prefix=path"
   -basic-auth
         Make admin UI use http basic authentication. If not set, it uses Digest authentication (more secure)
+  -config string
+        Config file name (toml format). Default is "~/.config/sgp/sgp.toml"
   -cors
         Set "Access-Control-Allow-Origin: *" header for admin API
   -curl-binary string
@@ -118,7 +120,27 @@ Command-line flag arguments:
         Username of admin UI (Admin UI is available at "adminpath") (default "root")
 ```
 
-All arguments are optional, and can also be set by environment variable. The environment variable name is the `SGP_` prefix concating flag name in uppercase and replacing `-` with `_`. E.g.: `enable-file` flag can be set by setting `SGP_ENABLE_FILE=true` env. For the array list type flags like `-open-scope`, the env value should be all array item values joined by `;`.
+All flags are optional, and can also be set by environment variable. The environment variable name is the `SGP_` prefix concating flag name in uppercase and replacing `-` with `_`. E.g.: `enable-file` flag can be set by setting `SGP_ENABLE_FILE=true` env. For the array list type flags like `-open-scope`, the env value should be all array item values joined by `;`.
+
+Alternatively, you can set flags using `~/.config/sgp/sgp.toml` config file, where `~` is the user home dir of current OS. Example config file:
+
+```toml
+addr = 8382
+enable_file = true
+
+alias = [
+  "/ip/=/_sgp_cors=/ipinfo.io/"
+]
+
+[env]
+SECRET = "abc"
+```
+
+Notes:
+
+- The variable name in config file is the lowercase flag name with `-` replaced by `_`.
+- The config file path can be explicitly specified via `-config=<value>` command line flag.
+- The `env` is a config-file-specific variable that can be used to set environment variables of Simplegoproxy process.
 
 ## Usage
 
