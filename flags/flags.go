@@ -67,10 +67,12 @@ func (i *ArrayFlags) Set(value string) error {
 }
 
 func init() {
-	flag.StringVar(&ConfigFile, "config", "", `Config file name (toml format). Default is "~/.config/sgp/sgp.toml"`)
+	flag.StringVar(&ConfigFile, "config", "",
+		`Config file name (toml format). Default is "~/.config/sgp/sgp.toml". Set to "`+constants.NONE+
+			`" to suppress default config file`)
 	flag.StringVar(&Addr, "addr", fmt.Sprintf("0.0.0.0:%d", DEFAULT_PORT),
-		fmt.Sprintf(`Http listening addr, e.g. "127.0.0.1:%d" or ":%d". If not set, will listen on "0.0.0.0:%d"`,
-			DEFAULT_PORT, DEFAULT_PORT, DEFAULT_PORT))
+		fmt.Sprintf(`Http listening addr, e.g. "127.0.0.1:%d" or ":%d" or just "%d" (port only). If not set, will listen on "0.0.0.0:%d"`,
+			DEFAULT_PORT, DEFAULT_PORT, DEFAULT_PORT, DEFAULT_PORT))
 	flag.BoolVar(&Log, "log", false, "Log every request urls")
 	flag.BoolVar(&SupressError, "supress-error", false, "Supress error display, send a 404 to client instead")
 	flag.BoolVar(&Encrypt, "encrypt", false, `Used with "-sign", encrypt generated entrypoint url`)
@@ -123,7 +125,9 @@ func DoParse() {
 
 	// Then, read config file that is declared on the command line.
 	if ConfigFile != "" {
-		parseFromConfigFile(ConfigFile, arrayFlagNames, flagSet)
+		if ConfigFile != constants.NONE {
+			parseFromConfigFile(ConfigFile, arrayFlagNames, flagSet)
+		}
 		configFileLoaded = true
 	}
 
@@ -169,7 +173,9 @@ func DoParse() {
 			}
 		}
 		if ConfigFile != "" {
-			parseFromConfigFile(ConfigFile, arrayFlagNames, flagSet)
+			if ConfigFile != constants.NONE {
+				parseFromConfigFile(ConfigFile, arrayFlagNames, flagSet)
+			}
 			configFileLoaded = true
 		}
 	}

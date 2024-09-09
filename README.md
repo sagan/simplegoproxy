@@ -57,7 +57,7 @@ Command-line flag arguments:
 
 ```
   -addr string
-        Http listening addr, e.g. "127.0.0.1:8380" or ":8380". If not set, will listen on "0.0.0.0:8380" (default "0.0.0.0:8380")
+        Http listening addr, e.g. "127.0.0.1:8380" or ":8380" or just "8380" (port only). If not set, will listen on "0.0.0.0:8380" (default "0.0.0.0:8380")
   -adminpath string
         Admin UI path. Default is <rootpath> + "admin/"
   -alias value
@@ -65,7 +65,7 @@ Command-line flag arguments:
   -basic-auth
         Make admin UI use http basic authentication. If not set, it uses Digest authentication (more secure)
   -config string
-        Config file name (toml format). Default is "~/.config/sgp/sgp.toml"
+        Config file name (toml format). Default is "~/.config/sgp/sgp.toml". Set to "none" to suppress default config file
   -cors
         Set "Access-Control-Allow-Origin: *" header for admin API
   -curl-binary string
@@ -255,17 +255,17 @@ http://localhost:8380/_sgp_cors/https://ipcfg.co/json
 
 Response body substitutions modify the original http response returned by the target url server, replacing one certain string (needle) with another (replacement). It's somewhat similar to nginx [http_sub](https://nginx.org/en/docs/http/ngx_http_sub_module.html) module.
 
-The response body substitutions is only applied when certain conditions meet. Change default behavior by setting the follow parameters:
-
-- `_sgp_subpath=<value>`: Array Value. Apply substitutions only if target url path ends with this value. E.g. `.html`. If none is set, url path suffix check is skipped.
-- `_sgp_subtype=<value>`: Array Value. Apply substitutions only if target url original response has this [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types) ("Content-Type"). E.g. `txt`, `text/plain`. Set to `*` to accept all content-types. If none is set, default behavior is to apply substitutions if the original response has a textual content type, which could be any one of the following: `text/*`, `application/json`, `application/xml`, `application/yaml`, `application/toml`, `application/atom+xml`, `application/x-sh`.
-- `_sgp_forcesub=1`: Force do substitutions on any response, no matter of it's url path suffix or content type.
-
 To do response body substitutions, use any of the following parameters to set the find-and-replace rule(s). These parameters can be specified multiple times. Note both the needle and replacement part of the string should be url encoded.
 
 - `_sgp_sub_<string>=<replacement>` : Do basic string find and replacement. E.g. `_sgp_sub_org=ORG`: `org` => `ORG`.
 - `_sgp_subr_<Regexp>=<replacement>` : Do regexp find and replacement. E.g. `_sgp_subr_No.%5Cs*(%5Cd%2B)=no-$1`: `No.\s*(\d+)` => `no-$1`, it will search for patterns like `No. 123` and replace it with `no-123`.
 - `_sgp_subb_<HexString>=<replacement>` : Do binary find and replacement. Use hex string format. E.g. `_sgp_subb_aabb=ccdd`: `aa bb` => `cc dd`.
+
+The response body substitutions are only applied when certain conditions meet. Change default behavior by setting the follow parameters:
+
+- `_sgp_subpath=<value>`: Array Value. Apply substitutions only if target url path ends with this value. E.g. `.html`. If none is set, url path suffix check is skipped.
+- `_sgp_subtype=<value>`: Array Value. Apply substitutions only if target url original response has this [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types) ("Content-Type"). E.g. `txt`, `text/plain`. Set to `*` to accept all content-types. If none is set, default behavior is to apply substitutions if the original response has a textual content type, which could be any one of the following: `text/*`, `application/json`, `application/xml`, `application/yaml`, `application/toml`, `application/atom+xml`, `application/x-sh`.
+- `_sgp_forcesub=1`: Force do substitutions on any response, no matter of it's url path suffix or content type.
 
 ### Impersonate the Browser
 
@@ -334,6 +334,7 @@ If current entrypoint url is signed, some more pre-defined functions are availab
     - A string starts with `https://` or `http://` : the target url to fetch.
   - `Body`, `Data`: The response body string and parsed data object. Set when `NOBODY` is not set.
   - `RawBody`: The raw response body (`io.ReadCloser`). Set when `NOBODY` is set.
+- `system(cmdline)` : Execute a cmdline and return exit code. If stdout is needed, use `exec()` instead (see codes).
 - `read(input)` : Read a `io.ReadCloser` or `io.Reader`, return all of it's contents as `[]byte`.
 - `unmarshal(typ, data)` : Parse data (string or []byte) to object according to type. `typ` could be file ext (e.g. `txt`) or mediatype (e.g. `text/plain`).
 - `marshal(typ, data)` : Serialize data to string.
@@ -429,7 +430,7 @@ E.g.: If rootpath is set to "/abc/", then the entrypoint url should be like `htt
 
 ### Request signing
 
-Additional, if "key" flag is set, all requests to Simplegoproxy (except requests of `data:` urls) must be signed via HMAC-SHA256 using the key. The message being signed is the "canonical url" of the request. The result MAC (message authentication code) should be provided in `_sgp_sign` parameter of the request.
+If "key" flag is set, "request signing" will be enabled. It's the core security mechanism of Simplegoproxy. When request signing is enabled, all requests to Simplegoproxy must be signed via HMAC-SHA256 using the key. The message being signed is the "canonical url" of the request. The result MAC (message authentication code) must be provided in `_sgp_sign` parameter of the request.
 
 The "canonical url" is the target url with all `_sgp_*` modification parameters (excluding `_sgp_sign` and `_sgp_keytype`) in query values. All query values sorted by key.
 
@@ -463,7 +464,12 @@ simplegoproxy -sign -key abc -publicurl "http://localhost:8380" "https://ipinfo.
 https://ipinfo.io/ip?_sgp_cors=  http://localhost:8380/_sgp_sign=e9ccc14d94cd952d08bef094d9037c26b624a8bf18e6dc6c223d76224d4196ef/https://ipinfo.io/ip?_sgp_cors=
 ```
 
-It's also possible to make some urls do not require signing, see below "Open scopes" section.
+Notes:
+
+- By default `data:` urls do not require signing because it does not have any side effect. It's also possible to make specific urls do not require signing, see below "Open scopes" section.
+- If a request is not signed, some features will NOT work, e.g. env substitutions, pre-defined response template functions.
+- Most of other security mechanisms of Simplegoproxy require request signing to be enabled, or they will not work, e.g. URL encryption, request authentication, response encryption. It's highly recommanded to enable request signing in production environment.
+- Requests to the "alies" URLs (See above "URL Aliases" section) do not need signing and act as if already signed.
 
 ### Admin UI Authorization
 
@@ -561,15 +567,13 @@ If the `_sgp_epath` parameter is set, the encrypted url can also take a suffix o
 
 ### Request authentication
 
-If the `_sgp_auth=uass:pass` parameter is set, the request to the entrypoint url will require http access authentication using specified username & password.
-
-Note only the encrpyted form entrypoint url can be used if the `_sgp_auth` parameter is set.
+If the `_sgp_auth=uass:pass` parameter is set, request authentication is enabled. The request to the entrypoint url will require http access authentication using specified username & password. Note only the encrpyted form entrypoint url can be used in this case.
 
 By default it uses [basic access authentication](https://en.wikipedia.org/wiki/Basic_access_authentication). If `_sgp_authmode` (bitwise flags integer) parameter is set to `1`, it will use [digest access authentication](https://en.wikipedia.org/wiki/Digest_access_authentication).
 
 ### Response encrpytion
 
-If "URL encryption" is used and the `_sgp_respass=<value>` parameter is set, Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (by default no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`.
+If the `_sgp_respass=<value>` parameter is set, response encrpytion will be enabled. Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (by default no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`. If response encrpytion is enabled, only the encrypted form entrypoint url can be used.
 
 By default, the http response will always has `200` status with only three http headers: `Content-Type: text/plain` and `Content-Length`; Along with the `X-Encryption-Meta` header, which is the encrypted base64 string of the json object `{status, header, body_length, body_sha256, date, encrypted_url, request_query, source_addr}`:
 

@@ -379,7 +379,7 @@ export default function Home({}) {
               </option>
               <option
                 value="mutetype"
-                title="Mute target url original response if it has this content-type, '*' means all but html/txt"
+                title="Mute target url original response if it has this content-type, '*' means all but html & txt"
               >
                 mutetype
               </option>
@@ -391,7 +391,7 @@ export default function Home({}) {
               </option>
               <option
                 value="mutestatus"
-                title="Mute target url original response if it has this status code, '*' means all non-OK"
+                title="Mute target url original response if it has this status code, '*' means all but 200 & 206"
               >
                 mutestatus
               </option>

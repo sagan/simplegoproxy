@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/google/shlex"
 	"github.com/sagan/simplegoproxy/util"
 )
 
@@ -30,7 +32,10 @@ var templateFuncMap = map[string]any{
 	"neg":            neg,
 	"abs":            absFunc,
 	"read":           read,
+	"shlex_split":    shlexSplit,
 	"fetch":          fetch,
+	"system":         system,
+	"exec":           execFunc,
 }
 
 // Base64 decode
@@ -126,6 +131,8 @@ func fetch(options ...string) *Response {
 	var body io.ReadCloser
 	for _, option := range options {
 		switch {
+		case option == "":
+			// no action
 		case strings.HasPrefix(option, "http://") || strings.HasPrefix(option, "https://"):
 			urlStr = option
 		case option == NOBODY:
@@ -255,4 +262,65 @@ func read(input any) (data []byte) {
 	default:
 		return []byte(fmt.Sprint(v))
 	}
+}
+
+func shlexSplit(input any) []string {
+	args, _ := shlex.Split(any2string(input))
+	return args
+}
+
+// Similar to C library system funtion.
+func system(cmdline any) int {
+	args, err := shlex.Split(any2string(cmdline))
+	if err != nil || len(args) < 1 {
+		return -1
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	err = cmd.Wait()
+	if err != nil {
+		switch e := err.(type) {
+		case *exec.ExitError:
+			return e.ExitCode()
+		default:
+			return -1
+		}
+	}
+	return 0
+}
+
+type ExecResponse struct {
+	Err error
+	Out []byte
+}
+
+func execFunc(options ...any) *ExecResponse {
+	combined := false
+	cmdline := ""
+	for _, option := range options {
+		switch v := option.(type) {
+		case bool:
+			combined = v
+		case string:
+			if v != "" {
+				cmdline = v
+			}
+		case []byte:
+			if v != nil {
+				cmdline = string(v)
+			}
+		}
+	}
+	res := &ExecResponse{}
+	args, err := shlex.Split(cmdline)
+	if err != nil || len(args) < 1 {
+		res.Err = fmt.Errorf("parse cmdline error: %v", err)
+		return res
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	if combined {
+		res.Out, res.Err = cmd.CombinedOutput()
+	} else {
+		res.Out, res.Err = cmd.Output()
+	}
+	return res
 }
