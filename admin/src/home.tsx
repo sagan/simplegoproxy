@@ -108,7 +108,7 @@ export default function Home({}) {
                 resetParams();
               }}
             >
-              SGP
+              {window.__SITENAME__}
             </a>
             <a title="Github" href="https://github.com/sagan/simplegoproxy">
               ℹ️

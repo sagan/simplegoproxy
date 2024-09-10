@@ -39,6 +39,7 @@ var (
 	RcloneConfig        string
 	CurlBinary          string
 	Rootpath            string
+	Sitename            string
 	Adminpath           string
 	Prefix              string
 	Eid                 string
@@ -96,6 +97,7 @@ func init() {
 	flag.StringVar(&CurlBinary, "curl-binary", "curl", "Curl binary path")
 	flag.StringVar(&RcloneConfig, "rclone-config", "", "Manually specify rclone config file path")
 	flag.StringVar(&Rootpath, "rootpath", "/", "Root path (with leading and trailing slash)")
+	flag.StringVar(&Sitename, "sitename", "SGP", `The site name`)
 	flag.StringVar(&Adminpath, "adminpath", "", `Admin UI path. Default is <rootpath> + "admin/"`)
 	flag.StringVar(&PublicUrl, "publicurl", "",
 		`Public url of this service. Used with "-sign". E.g. "https://sgp.example.com/". `+

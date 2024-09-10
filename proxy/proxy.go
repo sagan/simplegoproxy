@@ -90,8 +90,11 @@ const (
 	ARGS_SRING             = "args"
 )
 
-// These params do not participate in url signing, sign, keytype, salt.
+// These params do not participate in url signing: sign, keytype, salt.
 var NoSignParameters = []string{SIGN_STRING, KEYTYPE_STRING, SALT_STRING}
+
+// These params are allowed in query string of an alias url: salt.
+var AliasUrlAllowedQueryParameters = []string{SALT_STRING}
 
 var errNotFound = fmt.Errorf("404 not found")
 
@@ -116,7 +119,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	openNormal, supressError, doLog bool, enableUnix, enableFile, enableRclone, enableCurl, enableExec bool,
 	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD, authenticator *auth.Auth) {
 	defer r.Body.Close()
-	// in alias mode, url is treated as if signed, but mod params can not exists in  query variable
+	// in alias mode, url is treated as if signed, but most mod params can not exists in query variables
 	var inalias = false
 	if r.URL.Fragment != "" {
 		for _, flag := range util.SplitCsv(r.URL.Fragment) {
@@ -129,7 +132,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	srcUrlQuery := r.URL.Query()
 	if inalias {
 		for key := range srcUrlQuery {
-			if strings.HasPrefix(key, prefix) {
+			if strings.HasPrefix(key, prefix) && !slices.Contains(AliasUrlAllowedQueryParameters, key[len(prefix):]) {
 				srcUrlQuery.Del(key)
 			}
 		}
@@ -234,7 +237,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	if doLog {
 		log.Printf("Fetch: url=%s, params=%v, src=%s", targetUrlObj, queryParams, r.RemoteAddr)
 	}
-	if encryltedUrlPath == "" && (queryParams.Has(RESPASS_STRING) || queryParams.Has(AUTH_STRING)) {
+	if encryltedUrlPath == "" && !inalias && (queryParams.Has(RESPASS_STRING) || queryParams.Has(AUTH_STRING)) {
 		sendError(w, r, supressError, doLog, "url with auth or respass must be accessed via encrypted url")
 		return
 	}
@@ -1062,7 +1065,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				}
 				response["Body"] = string(body)
 			} else {
-				response["Body"] = res.Body
+				response["RawBody"] = res.Body
 			}
 		} else {
 			response["Body"] = templateContents

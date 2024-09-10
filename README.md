@@ -346,7 +346,7 @@ The `_sgp_tplmode` (template mode, default to 0) is a bitwise flags integer para
 
 - bit 0 (`& 1`): Always uses text template, never uses html template..
 - bit 1 (`& 2`) : Use target url original response body as template. In this case, the `_sgp_resbody` is not mandatory required; it will instead serve as `Res.Body` context variable.
-- bit 2 (`& 4`) : Do not read target url original response body prior renderring. The `Res.Body` context variable will be raw `io.ReadCloser` in this case.
+- bit 2 (`& 4`) : Do not read target url original response body prior renderring. The `Res.Body` will not be set; Instead, the `Res.RawBody` context variable will be set to the raw body `io.ReadCloser`.
 - bit 3 (`& 8`) : Always do response template no matter of target url path suffix or response content type.
 - bit 3 (`& 16`) : Keep the content-type of original response unchanged.
 
@@ -418,7 +418,10 @@ Then the following "alias" entrypoint urls will be equalvalent to non-alias ones
 - `http://localhost:8380/test/` => `http://localhost:8380/_sgp_cors=1/https://ipinfo.io/`.
 - `http://localhost:8380/test/ip` => `http://localhost:8380/_sgp_cors=1/https://ipinfo.io/ip`.
 
-The "alias" entrypoint urls do not require explicit signing and always treated as already signed (That's say, `_sgp_sign` parameter is not required). However, all modification parameters must be inside the alias `<prefix>` part and can not exist in the URL query variable.
+Notes:
+
+- The "alias" entrypoint urls do not require explicit signing and always treated as already signed (That's say, `_sgp_sign` parameter is not required).
+- In an "alias" url, all modification parameters must be inside the alias `<prefix>` part and can not exist in the URL query variable. The below parameters are exceptions: `_sgp_salt`, they can still exist in query variables of an "alias" url.
 
 ## Security features
 
@@ -567,13 +570,13 @@ If the `_sgp_epath` parameter is set, the encrypted url can also take a suffix o
 
 ### Request authentication
 
-If the `_sgp_auth=uass:pass` parameter is set, request authentication is enabled. The request to the entrypoint url will require http access authentication using specified username & password. Note only the encrpyted form entrypoint url can be used in this case.
+If the `_sgp_auth=uass:pass` parameter is set, request authentication is enabled. The request to the entrypoint url will require http access authentication using specified username & password. Note only the encrpyted form entrypoint url can be used in this case, unless current request is accessed via a "alias" url.
 
 By default it uses [basic access authentication](https://en.wikipedia.org/wiki/Basic_access_authentication). If `_sgp_authmode` (bitwise flags integer) parameter is set to `1`, it will use [digest access authentication](https://en.wikipedia.org/wiki/Digest_access_authentication).
 
 ### Response encrpytion
 
-If the `_sgp_respass=<value>` parameter is set, response encrpytion will be enabled. Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (by default no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`. If response encrpytion is enabled, only the encrypted form entrypoint url can be used.
+If the `_sgp_respass=<value>` parameter is set, response encrpytion will be enabled. Simplegoproxy will encrypt the response body sent back to client using the parameter's value as password. The encryption uses AES256-GCM with the cryptographic key derived from password via PBKDF2 + SHA-256 of 1000000 iterations (by default no salt). The response body sent back to client is the base64 string of `iv (12 bytes) + ciphertext`. Note only the encrpyted form entrypoint url can be used in this case, unless current request is accessed via a "alias" url.
 
 By default, the http response will always has `200` status with only three http headers: `Content-Type: text/plain` and `Content-Length`; Along with the `X-Encryption-Meta` header, which is the encrypted base64 string of the json object `{status, header, body_length, body_sha256, date, encrypted_url, request_query, source_addr}`:
 

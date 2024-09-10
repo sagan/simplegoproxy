@@ -54,7 +54,7 @@ func main() {
 	if strings.ContainsAny(flags.Key, constants.LINE_BREAKS) {
 		log.Fatalf(`The "key" flag can not contains line breaks`)
 	}
-	flags.Rootpath = normalizeUrlPath(flags.Rootpath)
+	flags.Rootpath, _ = normalizeUrlPath(flags.Rootpath)
 	flags.KeytypeBlacklist = util.SplitCsv(flags.KeytypeBlacklistStr)
 	if flags.Key != "" {
 		if flags.Cipher, err = util.GetCipher(flags.Key, ""); err != nil {
@@ -113,23 +113,23 @@ func main() {
 	if flags.Adminpath == "" {
 		flags.Adminpath = flags.Rootpath + "admin/"
 	} else {
-		flags.Adminpath = normalizeUrlPath(flags.Adminpath)
+		flags.Adminpath, _ = normalizeUrlPath(flags.Adminpath)
 	}
 
-	// [][prefix, path]. longest prefix first.
+	// [][prefix, path, rawpath]. longest prefix first.
 	// prefix & path always starts and ends with "/".
-	// e.g.: ["/abc/", "/sgp/_sgp_cors/example.com/"] .
-	var aliases = [][2]string{}
+	// e.g.: ["/abc/", "/_sgp_sub_ip=//ipinfo.io/", "/_sgp_sub_ip=%2F/ipinfo.io/"] .
+	var aliases = [][3]string{}
 	for _, a := range flags.Aliases {
 		prefix, path, found := strings.Cut(a, "=")
 		if !found || prefix == "" || path == "" {
 			log.Fatalf("invalid alias %q", a)
 		}
-		prefix = normalizeUrlPath(prefix)
-		path = normalizeUrlPath(path)
-		aliases = append(aliases, [2]string{prefix, path})
+		prefix, _ = normalizeUrlPath(prefix)
+		path, rawpath := normalizeUrlPath(path)
+		aliases = append(aliases, [3]string{prefix, path, rawpath})
 	}
-	slices.SortFunc(aliases, func(a, b [2]string) int { return len(b[0]) - len(a[0]) })
+	slices.SortFunc(aliases, func(a, b [3]string) int { return len(b[0]) - len(a[0]) })
 
 	fmt.Printf("simplegoproxy %s starts on %s, rootpath=%s, prefix=%s, signing_enabled(key_set)=%t, supress_error=%t\n",
 		version.Version, flags.Addr, flags.Rootpath, flags.Prefix, flags.Key != "", flags.SupressError)
@@ -146,7 +146,7 @@ func main() {
 	if len(aliases) > 0 {
 		fmt.Printf("Aliases:\n")
 		for _, alias := range aliases {
-			fmt.Printf("  %s => %s\n", alias[0], alias[1])
+			fmt.Printf("  %s => %s\n", alias[0], alias[2])
 		}
 	}
 	fmt.Printf("\n")
@@ -182,7 +182,7 @@ func main() {
 				r2.URL = new(url.URL)
 				*r2.URL = *r.URL
 				r2.URL.Path = alias[1] + p
-				r2.URL.RawPath = alias[1] + rp
+				r2.URL.RawPath = alias[2] + rp
 				r2.URL.Fragment = constants.REQ_INALIAS
 				proxyHandle.ServeHTTP(w, r2)
 				return
@@ -200,15 +200,18 @@ func main() {
 // Normalize a url path:
 // 1. Unescape.
 // 2. Make sure path starts and ends with "/".
-func normalizeUrlPath(path string) string {
-	if p, err := url.PathUnescape(path); err == nil {
+func normalizeUrlPath(inputpath string) (path, rawpath string) {
+	rawpath = inputpath
+	if !strings.HasPrefix(rawpath, "/") {
+		rawpath = "/" + rawpath
+	}
+	if !strings.HasSuffix(rawpath, "/") {
+		rawpath += "/"
+	}
+	if p, err := url.PathUnescape(rawpath); err == nil {
 		path = p
+	} else {
+		path = rawpath
 	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
-	return path
+	return path, rawpath
 }

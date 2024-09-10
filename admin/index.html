@@ -10,6 +10,7 @@
     />
     <title>Simplegoproxy</title>
     <script>
+      window.__SITENAME__ = "SGP"; //__SITENAME__
       window.__ENV__ = "development"; //__ENV__ ; development|production.
       window.__ROOTPATH__ = "/"; //__ROOTPATH__ ; root path of sgp url.
       window.__PREFIX__ = "_sgp_"; //__PREFIX__
@@ -23,7 +24,7 @@
         window.__ROOTURL__ = "http://localhost:8380/";
         window.__APIURL__ = "http://" + location.hostname + ":8380/admin/api";
       }
-      document.title += " " + window.__VERSION__;
+      document.title += " " + window.__VERSION__ + " - " + window.__SITENAME__;
     </script>
   </head>
   <body>

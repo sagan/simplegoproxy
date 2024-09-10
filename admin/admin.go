@@ -35,6 +35,7 @@ var GetHttpHandle = func() http.Handler {
 	variables := map[string]string{
 		"ROOTPATH": flags.Rootpath,
 		"PREFIX":   flags.Prefix,
+		"SITENAME": flags.Sitename,
 		"ENV":      "production",
 		"VERSION":  version.Version,
 	}

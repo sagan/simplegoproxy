@@ -1,4 +1,5 @@
 declare interface Window {
+  __SITENAME__: string;
   __PREFIX__: string;
   __ROOTPATH__: string;
   __ADMINPATH__: string;
