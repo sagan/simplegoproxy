@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/sprig/v3"
+	"github.com/dop251/goja"
 	"github.com/icholy/replace"
 	"github.com/vincent-petithory/dataurl"
 	"golang.org/x/text/transform"
@@ -31,6 +32,7 @@ import (
 	"github.com/sagan/simplegoproxy/auth"
 	"github.com/sagan/simplegoproxy/constants"
 	"github.com/sagan/simplegoproxy/flags"
+	"github.com/sagan/simplegoproxy/tpl"
 	"github.com/sagan/simplegoproxy/util"
 )
 
@@ -97,10 +99,6 @@ var NoSignParameters = []string{SIGN_STRING, KEYTYPE_STRING, SALT_STRING}
 var AliasUrlAllowedQueryParameters = []string{SALT_STRING}
 
 var errNotFound = fmt.Errorf("404 not found")
-
-type Template interface {
-	Execute(wr io.Writer, data any) error
-}
 
 func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg string, args ...any) {
 	errormsg := fmt.Sprintf(msg, args...)
@@ -929,8 +927,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 
 	var tplStatus int
 	var tplHeader http.Header
+	var jsvm *goja.Runtime
 	var tplBody io.ReadCloser
-	var resBodyTemplate Template
+	var resBodyTemplate constants.Template
 	if templateContents != "" || tplmode&2 != 0 {
 		dotpl := func() bool {
 			if tplmode&2 != 0 && res.Body == nil {
@@ -955,11 +954,15 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}()
 		if dotpl {
 			tplHeader = http.Header{}
-			getTemplate := func(contents string, usehtml bool) (tpl Template, err error) {
+			jsvm = goja.New()
+			getTemplate := func(contents string, usehtml bool) (tplobj constants.Template, err error) {
 				// dummy side effect template funcs to update request-scope state
 				funcs := template.FuncMap{
+					"eval": func(input any) any {
+						return tpl.Eval(jsvm, input)
+					},
 					"set_status": func(input any) string {
-						tplStatus, _ = strconv.Atoi(any2string(input))
+						tplStatus, _ = strconv.Atoi(tpl.Any2string(input))
 						return ""
 					},
 					"set_body": func(body any) string {
@@ -982,8 +985,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 						return ""
 					},
 					"set_header": func(key, value any) string {
-						keyStr := any2string(key)
-						valueStr := any2string(value)
+						keyStr := tpl.Any2string(key)
+						valueStr := tpl.Any2string(value)
 						if valueStr == "" {
 							tplHeader.Del(keyStr)
 						} else {
@@ -994,20 +997,20 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				}
 				if usehtml {
 					if isSigned || inalias {
-						tpl, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
+						tplobj, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(tpl.TemplateFuncMap).Funcs(funcs).
 							Parse(contents)
 					} else {
-						tpl, err = htmlTemplate.New("template").Funcs(funcs).Parse(contents)
+						tplobj, err = htmlTemplate.New("template").Funcs(funcs).Parse(contents)
 					}
 				} else {
 					if isSigned || inalias {
-						tpl, err = template.New("template").Funcs(sprig.FuncMap()).Funcs(templateFuncMap).Funcs(funcs).
+						tplobj, err = template.New("template").Funcs(sprig.FuncMap()).Funcs(tpl.TemplateFuncMap).Funcs(funcs).
 							Parse(contents)
 					} else {
-						tpl, err = template.New("template").Funcs(funcs).Parse(contents)
+						tplobj, err = template.New("template").Funcs(funcs).Parse(contents)
 					}
 				}
-				return tpl, err
+				return tplobj, err
 			}
 			usehtml := responseMediaType == constants.MEDIATYPE_HTML && tplmode&1 == 0
 			if tplmode&2 == 0 {
@@ -1075,14 +1078,20 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 
 		buf := &bytes.Buffer{}
 		now := time.Now().UTC()
-		err = resBodyTemplate.Execute(buf, map[string]any{
+		contextVariables := map[string]any{
 			"Params": queryParams,
 			"SrcReq": srcRequest,
 			"Req":    request,
 			"Res":    response,
 			"Err":    tplerr,
 			"Now":    now,
-		})
+		}
+		if jsvm != nil {
+			for key, value := range contextVariables {
+				jsvm.Set(key, value)
+			}
+		}
+		err = resBodyTemplate.Execute(buf, contextVariables)
 		if err != nil {
 			return util.ErrResponseMsg("Failed to execute response template: %v", err), nil
 		} else {

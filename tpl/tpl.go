@@ -1,4 +1,4 @@
-package proxy
+package tpl
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ const NOBODY = "NOBODY"
 
 // Additional template functions, require url to be signed.
 // Due to the pipeline way that Go template works, the last argument of funcs shoud be the primary one.
-var templateFuncMap = map[string]any{
+var TemplateFuncMap = map[string]any{
 	"btoa":           btoa,
 	"atob":           atob,
 	"marshal":        marshal,
@@ -40,13 +40,13 @@ var templateFuncMap = map[string]any{
 
 // Base64 decode
 func atob(input any) string {
-	output, _ := base64.StdEncoding.DecodeString(any2string(input))
+	output, _ := base64.StdEncoding.DecodeString(Any2string(input))
 	return string(output)
 }
 
 // Base64 encode
 func btoa(input any) string {
-	return base64.StdEncoding.EncodeToString([]byte(any2string(input)))
+	return base64.StdEncoding.EncodeToString([]byte(Any2string(input)))
 }
 
 // Convert input to int. if failed to parse input as int, return 0.
@@ -61,7 +61,7 @@ func atoi(input any) int {
 			return int(v)
 		}
 	}
-	i, err := strconv.Atoi(any2string(input))
+	i, err := strconv.Atoi(Any2string(input))
 	if err != nil {
 		return 0
 	}
@@ -69,12 +69,12 @@ func atoi(input any) int {
 }
 
 func unmarshal(contentType any, input any) any {
-	data, _ := util.Unmarshal(any2string(contentType), strings.NewReader(any2string(input)))
+	data, _ := util.Unmarshal(Any2string(contentType), strings.NewReader(Any2string(input)))
 	return data
 }
 
 func marshal(contentType any, input any) string {
-	data, _ := util.Marshal(any2string(contentType), input)
+	data, _ := util.Marshal(Any2string(contentType), input)
 	return string(data)
 }
 
@@ -98,7 +98,7 @@ func any2byteslice(input any) []byte {
 // If input is nil, return empty string.
 // If input is string or []byte, return as it.
 // Otherwise return fmt.Sprint(input).
-func any2string(input any) string {
+func Any2string(input any) string {
 	if input == nil {
 		return ""
 	}
@@ -191,21 +191,21 @@ func encrypt(password, salt, data any) string {
 // Encrypt data to binary string
 func encrypt_binary(password, salt, data any) []byte {
 	// if password
-	cipher, err := util.GetCipher(any2string(password), any2string(salt))
+	cipher, err := util.GetCipher(Any2string(password), Any2string(salt))
 	if err != nil {
 		return nil
 	}
-	return util.Encrypt(cipher, []byte(any2string(data)))
+	return util.Encrypt(cipher, []byte(Any2string(data)))
 }
 
 // Decrypt base64 data string
 func decrypt(password, salt, data any) string {
 	// if password
-	cipher, err := util.GetCipher(any2string(password), any2string(salt))
+	cipher, err := util.GetCipher(Any2string(password), Any2string(salt))
 	if err != nil {
 		return ""
 	}
-	plaintext, err := util.DecryptBase64String(cipher, any2string(data))
+	plaintext, err := util.DecryptBase64String(cipher, Any2string(data))
 	if err != nil {
 		return ""
 	}
@@ -214,7 +214,7 @@ func decrypt(password, salt, data any) string {
 
 // Decrypt binary data
 func decrypt_binary(password, salt, data any) string {
-	cipher, err := util.GetCipher(any2string(password), any2string(salt))
+	cipher, err := util.GetCipher(Any2string(password), Any2string(salt))
 	if err != nil {
 		return ""
 	}
@@ -265,13 +265,13 @@ func read(input any) (data []byte) {
 }
 
 func shlexSplit(input any) []string {
-	args, _ := shlex.Split(any2string(input))
+	args, _ := shlex.Split(Any2string(input))
 	return args
 }
 
 // Similar to C library system funtion.
 func system(cmdline any) int {
-	args, err := shlex.Split(any2string(cmdline))
+	args, err := shlex.Split(Any2string(cmdline))
 	if err != nil || len(args) < 1 {
 		return -1
 	}
