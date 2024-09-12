@@ -25,6 +25,8 @@ import (
 
 	"github.com/Masterminds/sprig/v3"
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/console"
+	"github.com/dop251/goja_nodejs/require"
 	"github.com/icholy/replace"
 	"github.com/vincent-petithory/dataurl"
 	"golang.org/x/text/transform"
@@ -126,6 +128,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 				inalias = true
 			}
 		}
+		r.URL.Fragment = ""
 	}
 	srcUrlQuery := r.URL.Query()
 	if inalias {
@@ -955,11 +958,17 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if dotpl {
 			tplHeader = http.Header{}
 			jsvm = goja.New()
+			new(require.Registry).Enable(jsvm)
+			console.Enable(jsvm) // depends on require
 			getTemplate := func(contents string, usehtml bool) (tplobj constants.Template, err error) {
 				// dummy side effect template funcs to update request-scope state
 				funcs := template.FuncMap{
 					"eval": func(input any) any {
-						return tpl.Eval(jsvm, input)
+						v, e := tpl.Eval(jsvm, input)
+						if e != nil && doLog {
+							log.Printf("eval error: %v", e)
+						}
+						return v
 					},
 					"set_status": func(input any) string {
 						tplStatus, _ = strconv.Atoi(tpl.Any2string(input))
@@ -968,19 +977,26 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 					"set_body": func(body any) string {
 						if body == nil {
 							tplBody = io.NopCloser(bytes.NewReader(nil))
-						} else {
-							switch v := body.(type) {
-							case io.ReadCloser:
-								tplBody = v
-							case io.Reader:
-								tplBody = io.NopCloser(v)
-							case []byte:
-								tplBody = io.NopCloser(bytes.NewReader(v))
-							case string:
-								tplBody = io.NopCloser(strings.NewReader(v))
-							default:
-								tplBody = io.NopCloser(strings.NewReader(fmt.Sprint(v)))
+							return ""
+						}
+						if gp, ok := body.(*goja.Promise); ok {
+							body, _ = tpl.ResolveGojaPromise(gp)
+							if body == nil {
+								tplBody = io.NopCloser(bytes.NewReader(nil))
+								return ""
 							}
+						}
+						switch v := body.(type) {
+						case io.ReadCloser:
+							tplBody = v
+						case io.Reader:
+							tplBody = io.NopCloser(v)
+						case []byte:
+							tplBody = io.NopCloser(bytes.NewReader(v))
+						case string:
+							tplBody = io.NopCloser(strings.NewReader(v))
+						default:
+							tplBody = io.NopCloser(strings.NewReader(fmt.Sprint(v)))
 						}
 						return ""
 					},
@@ -1083,6 +1099,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			"SrcReq": srcRequest,
 			"Req":    request,
 			"Res":    response,
+			"Ctx":    map[string]any{},
 			"Err":    tplerr,
 			"Now":    now,
 		}

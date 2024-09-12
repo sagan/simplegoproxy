@@ -6,6 +6,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/Noooste/azuretls-client v1.5.4
 	github.com/dop251/goja v0.0.0-20240828124009-016eb7256539
+	github.com/dop251/goja_nodejs v0.0.0-20240728170619-29b559befffc
 	github.com/gomarkdown/markdown v0.0.0-20240730141124-034f12af3bf6
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/icholy/replace v0.6.0
@@ -29,8 +30,8 @@ require (
 	github.com/cloudflare/circl v1.4.0 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/fatih/color v1.17.0 // indirect
-	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
-	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
+	github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect

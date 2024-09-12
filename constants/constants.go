@@ -34,6 +34,7 @@ var EncryptedUrlRegex = regexp.MustCompile(`^((?P<eid>[_a-zA-Z0-9]+?)_)?(?P<eurl
 // textual metiatypes besides "text/*
 var TextualMediatypes = []string{
 	"application/json",
+	"application/javascript",
 	"application/xml",
 	"application/yaml",
 	"application/toml",

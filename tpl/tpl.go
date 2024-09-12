@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dop251/goja"
 	"github.com/google/shlex"
 	"github.com/sagan/simplegoproxy/util"
 )
@@ -97,10 +98,17 @@ func any2byteslice(input any) []byte {
 // Convert input to string.
 // If input is nil, return empty string.
 // If input is string or []byte, return as it.
+// If input is a goja Promise, use it's resolved value.
 // Otherwise return fmt.Sprint(input).
 func Any2string(input any) string {
 	if input == nil {
 		return ""
+	}
+	if gp, ok := input.(*goja.Promise); ok {
+		input, _ = ResolveGojaPromise(gp)
+		if input == nil {
+			return ""
+		}
 	}
 	switch value := input.(type) {
 	case string:
@@ -290,7 +298,7 @@ func system(cmdline any) int {
 
 type ExecResponse struct {
 	Err error
-	Out []byte
+	Out string
 }
 
 func execFunc(options ...any) *ExecResponse {
@@ -317,10 +325,13 @@ func execFunc(options ...any) *ExecResponse {
 		return res
 	}
 	cmd := exec.Command(args[0], args[1:]...)
+	var out []byte
 	if combined {
-		res.Out, res.Err = cmd.CombinedOutput()
+		out, err = cmd.CombinedOutput()
 	} else {
-		res.Out, res.Err = cmd.Output()
+		out, err = cmd.Output()
 	}
+	res.Out = string(out)
+	res.Err = err
 	return res
 }
