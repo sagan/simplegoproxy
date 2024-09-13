@@ -301,27 +301,24 @@ type ExecResponse struct {
 	Out string
 }
 
-func execFunc(options ...any) *ExecResponse {
+func execFunc(options ...string) *ExecResponse {
 	combined := false
 	cmdline := ""
 	for _, option := range options {
-		switch v := option.(type) {
-		case bool:
-			combined = v
-		case string:
-			if v != "" {
-				cmdline = v
-			}
-		case []byte:
-			if v != nil {
-				cmdline = string(v)
-			}
+		if option == "" {
+			continue
+		}
+		switch option {
+		case "?COMBINED":
+			combined = true
+		default:
+			cmdline = option
 		}
 	}
 	res := &ExecResponse{}
 	args, err := shlex.Split(cmdline)
 	if err != nil || len(args) < 1 {
-		res.Err = fmt.Errorf("parse cmdline error: %v", err)
+		res.Err = fmt.Errorf("parse cmdline error: %w", err)
 		return res
 	}
 	cmd := exec.Command(args[0], args[1:]...)

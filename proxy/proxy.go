@@ -3,7 +3,9 @@ package proxy
 import (
 	"bytes"
 	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -85,20 +87,22 @@ const (
 	TPLPATH_STRING         = "tplpath"
 	TPLTYPE_STRING         = "tpltype"
 	INDEXFILE_STRING       = "indexfile"
+	DEFAULTEXT_STRING      = "defaultext"
 	MD2HTML_STRING         = "md2html"
 	DEBUG_STRING           = "debug"
 	EPATH_STRING           = "epath" // allow subpath in encrypted url
 	SALT_STRING            = "salt"
+	PUBLICKEY_STRING       = "publickey"
 	FLAG_STRING            = "flag"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
 )
 
 // These params do not participate in url signing: sign, keytype, salt.
-var NoSignParameters = []string{SIGN_STRING, KEYTYPE_STRING, SALT_STRING}
+var NoSignParameters = []string{SIGN_STRING, KEYTYPE_STRING, SALT_STRING, PUBLICKEY_STRING}
 
-// These params are allowed in query string of an alias url: salt.
-var AliasUrlAllowedQueryParameters = []string{SALT_STRING}
+// These params are allowed in query string of an alias url: salt, publickey.
+var AliasUrlAllowedQueryParameters = []string{SALT_STRING, PUBLICKEY_STRING}
 
 var errNotFound = fmt.Errorf("404 not found")
 
@@ -363,7 +367,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	keytype := ""
 	sign := ""
 	salt := ""
+	publickey := ""
 	indexfile := ""
+	defaultext := ""
 	// password to encrypt final response body to client
 	var respass = ""
 	var fdheaders []string
@@ -384,7 +390,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var sgpflag = 0
 	if f := queryParams.Get(FLAG_STRING); f != "" {
 		if sgpflag, err = strconv.Atoi(f); err != nil || sgpflag < 0 {
-			return nil, fmt.Errorf("invalid flag: %v", err)
+			return nil, fmt.Errorf("invalid flag: %w", err)
 		}
 	}
 	now := time.Now().Unix()
@@ -403,22 +409,22 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		case TPLMODE_STRING:
 			tplmode, err = strconv.Atoi(value)
 			if err != nil || tplmode < 0 {
-				return nil, fmt.Errorf("invalid tplmode: %v", err)
+				return nil, fmt.Errorf("invalid tplmode: %w", err)
 			}
 		case ENCMODE_STRING:
 			encmode, err = strconv.Atoi(value)
 			if err != nil || encmode < 0 {
-				return nil, fmt.Errorf("invalid encmode: %v", err)
+				return nil, fmt.Errorf("invalid encmode: %w", err)
 			}
 		case AUTHMODE_STRING:
 			authmode, err = strconv.Atoi(value)
 			if err != nil || authmode < 0 {
-				return nil, fmt.Errorf("invalid authmode: %v", err)
+				return nil, fmt.Errorf("invalid authmode: %w", err)
 			}
 		case STATUS_STRING:
 			status, err = strconv.Atoi(value)
 			if err != nil || (status != 0 && status != -1 && (status < 100 || status > 599)) {
-				return nil, fmt.Errorf("invalid status %q: %v", value, err)
+				return nil, fmt.Errorf("invalid status %q: %w", value, err)
 			}
 		case TPLPATH_STRING:
 			tplpathes = parseArrayParameters(sgpflag, values, false, nil)
@@ -441,8 +447,15 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			subtypes = parseArrayParameters(sgpflag, values, false, normalizeTypeParameter)
 		case SALT_STRING:
 			salt = value
+		case PUBLICKEY_STRING:
+			publickey = value
 		case INDEXFILE_STRING:
 			indexfile = value
+		case DEFAULTEXT_STRING:
+			if value != "" && value[0] != '.' {
+				value = "." + value
+			}
+			defaultext = value
 		case MD2HTML_STRING:
 			md2html = true
 		case DEBUG_STRING:
@@ -503,13 +516,13 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			origines = parseArrayParameters(sgpflag, values, true, nil)
 		case VALIDBEFORE_STRING:
 			if validbefore, err := util.ParseLocalDateTime(value); err != nil {
-				return nil, fmt.Errorf("invalid validbefore: %v", err)
+				return nil, fmt.Errorf("invalid validbefore: %w", err)
 			} else if now > validbefore {
 				return nil, fmt.Errorf("url expired")
 			}
 		case VALIDAFTER_STRING:
 			if validafter, err := util.ParseLocalDateTime(value); err != nil {
-				return nil, fmt.Errorf("invalid validafter: %v", err)
+				return nil, fmt.Errorf("invalid validafter: %w", err)
 			} else if now < validafter {
 				return nil, fmt.Errorf("url doesn't take effect yet")
 			}
@@ -570,8 +583,12 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 	}
 	effectiveUrlPath := urlObj.Path
-	if strings.HasSuffix(effectiveUrlPath, "/") && indexfile != "" {
-		effectiveUrlPath += indexfile
+	if strings.HasSuffix(effectiveUrlPath, "/") {
+		if indexfile != "" {
+			effectiveUrlPath += indexfile
+		}
+	} else if defaultext != "" && path.Ext(effectiveUrlPath) == "" {
+		effectiveUrlPath += defaultext
 	}
 	if responseContentType != "" {
 		if responseContentType == "*" { // guess from url path
@@ -752,7 +769,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs
 		dataURL, err := dataurl.DecodeString(urlStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid data url: %v", err)
+			return nil, fmt.Errorf("invalid data url: %w", err)
 		}
 		contentType := dataURL.ContentType()
 		res = &http.Response{
@@ -764,8 +781,12 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 	} else {
 		urlStr := originalUrlObj.String()
-		if strings.HasSuffix(urlStr, "/") && indexfile != "" {
-			urlStr += indexfile
+		if strings.HasSuffix(urlStr, "/") {
+			if indexfile != "" {
+				urlStr += indexfile
+			}
+		} else if defaultext != "" && path.Ext(urlStr) == "" {
+			urlStr += defaultext
 		}
 		var reqBody io.Reader
 		if forwardBody && srcReq.Body != nil {
@@ -775,7 +796,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 		req, err = http.NewRequestWithContext(srcReq.Context(), method, urlStr, reqBody)
 		if err != nil {
-			return nil, fmt.Errorf("invalid http request: %v", err)
+			return nil, fmt.Errorf("invalid http request: %w", err)
 		}
 		req.Header = header
 		username, password, _ := strings.Cut(user, ":")
@@ -855,12 +876,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	res.Header.Del("Clear-Site-Data")
 	res.Header.Del("Set-Cookie")
 	if trimresheader {
-		whitelist := []string{"Content-Type", "Content-Length", "Content-Encoding", "Content-Range"}
-		for key := range res.Header {
-			if !slices.Contains(whitelist, key) {
-				res.Header.Del(key)
-			}
-		}
+		trimheader(res.Header)
 	}
 	res.Header.Set("Referrer-Policy", "no-referrer")
 	if cors {
@@ -923,13 +939,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	if dosub {
 		res.Body, err = NewReadCloserReplacer(res.Body, subs, subrs, subbs)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create body replacer: %v", err)
+			return nil, fmt.Errorf("failed to create body replacer: %w", err)
 		}
 		deleteContentHeaders(res.Header)
 	}
 
 	var tplStatus int
 	var tplHeader http.Header
+	var tplClearHeader bool
 	var jsvm *goja.Runtime
 	var tplBody io.ReadCloser
 	var resBodyTemplate constants.Template
@@ -963,13 +980,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			getTemplate := func(contents string, usehtml bool) (tplobj constants.Template, err error) {
 				// dummy side effect template funcs to update request-scope state
 				funcs := template.FuncMap{
-					"eval": func(input any) any {
-						v, e := tpl.Eval(jsvm, input)
-						if e != nil && doLog {
-							log.Printf("eval error: %v", e)
-						}
-						return v
-					},
+
 					"set_status": func(input any) string {
 						tplStatus, _ = strconv.Atoi(tpl.Any2string(input))
 						return ""
@@ -1010,18 +1021,30 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 						}
 						return ""
 					},
+					"clear_header": func() string {
+						clear(tplHeader)
+						tplClearHeader = true
+						return ""
+					},
 				}
-				if usehtml {
-					if isSigned || inalias {
+				if isSigned || inalias {
+					funcs["eval"] = func(input any) any {
+						v, e := tpl.Eval(jsvm, input)
+						if e != nil && doLog {
+							log.Printf("eval error: %v", e)
+						}
+						return v
+					}
+					if usehtml {
 						tplobj, err = htmlTemplate.New("template").Funcs(sprig.FuncMap()).Funcs(tpl.TemplateFuncMap).Funcs(funcs).
 							Parse(contents)
 					} else {
-						tplobj, err = htmlTemplate.New("template").Funcs(funcs).Parse(contents)
-					}
-				} else {
-					if isSigned || inalias {
 						tplobj, err = template.New("template").Funcs(sprig.FuncMap()).Funcs(tpl.TemplateFuncMap).Funcs(funcs).
 							Parse(contents)
+					}
+				} else {
+					if usehtml {
+						tplobj, err = htmlTemplate.New("template").Funcs(funcs).Parse(contents)
 					} else {
 						tplobj, err = template.New("template").Funcs(funcs).Parse(contents)
 					}
@@ -1031,7 +1054,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			usehtml := responseMediaType == constants.MEDIATYPE_HTML && tplmode&1 == 0
 			if tplmode&2 == 0 {
 				if resBodyTemplate, err = getTemplate(templateContents, usehtml); err != nil {
-					return nil, fmt.Errorf("invalid template: %v", err)
+					return nil, fmt.Errorf("invalid template: %w", err)
 				}
 			} else {
 				body, err := io.ReadAll(res.Body)
@@ -1041,7 +1064,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 					return util.ErrResponseMsg("Failed to read body: %v", err), nil
 				}
 				if resBodyTemplate, err = getTemplate(string(body), usehtml); err != nil {
-					return nil, fmt.Errorf("invalid bodytpl template: %v", err)
+					return nil, fmt.Errorf("invalid bodytpl template: %w", err)
 				}
 			}
 		}
@@ -1122,6 +1145,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			if tplStatus > 0 {
 				res.StatusCode = tplStatus
 			}
+			if tplClearHeader {
+				trimheader(res.Header)
+			}
 			for key := range tplHeader {
 				res.Header.Set(key, tplHeader.Get(key))
 			}
@@ -1138,7 +1164,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("failed to read body: %v", err)
+			return nil, fmt.Errorf("failed to read body: %w", err)
 		}
 		html := util.MdToHTML(body)
 		res.Body = io.NopCloser(bytes.NewReader(html))
@@ -1150,11 +1176,26 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("failed to read body: %v", err)
+			return nil, fmt.Errorf("failed to read body: %w", err)
 		}
-		cipher, err := util.GetCipher(respass, salt)
+		var cipher cipher.AEAD
+		var localPrivatekey *ecdh.PrivateKey
+		var remotePublickey *ecdh.PublicKey
+		if publickey != "" {
+			remotePublickeyData, err := hex.DecodeString(publickey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse publickey hex: %w", err)
+			}
+			if remotePublickey, err = ecdh.X25519().NewPublicKey(remotePublickeyData); err != nil {
+				return nil, fmt.Errorf("invalid ecdh public key: %w", err)
+			}
+			if localPrivatekey, err = ecdh.X25519().GenerateKey(rand.Reader); err != nil {
+				return nil, fmt.Errorf("failed to generate ecdh private key: %w", err)
+			}
+		}
+		cipher, err = util.GetPublickeyCipher(respass, salt, localPrivatekey, remotePublickey)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get resbody cipher: %v", err)
+			return nil, fmt.Errorf("failed to get resbody cipher: %w", err)
 		}
 		mediaType := util.MediaType(res.Header.Get("Content-Type"))
 		var data map[string]any
@@ -1206,6 +1247,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				}
 				res.Header.Set("X-Encryption-Meta", util.EncryptToBase64String(cipher, metaJson))
 			}
+		}
+		if localPrivatekey != nil {
+			res.Header.Set("X-Encryption-Publickey", base64.StdEncoding.EncodeToString(localPrivatekey.PublicKey().Bytes()))
 		}
 		if encmode&1 != 0 { // bit 0 : sent cipertext as binary (instead of base64)
 			res.Header.Set("Content-Type", constants.DEFAULT_MIME)
@@ -1489,4 +1533,14 @@ func normalizeTypeParameter(typ string) string {
 		return ""
 	}
 	return util.MediaType(util.ContentType(typ))
+}
+
+// Trim (remove all headers) from header excerpt Content-*.
+func trimheader(header http.Header) {
+	whitelist := []string{"Content-Type", "Content-Length", "Content-Encoding", "Content-Range"}
+	for key := range header {
+		if !slices.Contains(whitelist, key) {
+			header.Del(key)
+		}
+	}
 }

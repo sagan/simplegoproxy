@@ -1,6 +1,8 @@
 package util
 
 import (
+	"crypto/ecdh"
+	"crypto/rand"
 	"testing"
 )
 
@@ -118,6 +120,49 @@ func TestEncryptDecrypt(t *testing.T) {
 		t.Fatalf("Failed to decrypt: %v", err)
 	}
 	if str != string(decryptedData) {
+		t.Fatalf("Decrypted data not correct")
+	}
+}
+
+// Encryption / Decryption schema combined shared password & public key exchange.
+// 0. alice and bob share a pass (used as pre shared key).
+// 1. alice => bob : send alice's public key and a salt.
+// 2. bob derives cipher key from:
+// pass, salt, ECDH key exchange result of bob's private key + alice's public key.
+// encrypt data use AES-256-GCM.
+// 3. bob => alice : send bob's public key and encrypted data.
+// 4. alice derives cipher key using similar way, decrypt data.
+func TestPublickeyEncryptDecrypt(t *testing.T) {
+	pass := "abc"
+	salt := "s"
+	curve := ecdh.X25519()
+	alicekey, err := curve.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate ecdh private key: %v", err)
+	}
+	bobkey, err := curve.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate ecdh private key: %v", err)
+	}
+	alicepub := alicekey.PublicKey()
+	bobpub := bobkey.PublicKey()
+
+	bobCipher, err := GetPublickeyCipher(pass, salt, bobkey, alicepub)
+	if err != nil {
+		t.Fatalf("Failed to get encrypt cipher: %v", err)
+	}
+	plainstring := "In God We Trust"
+	cipherstring := EncryptToString(bobCipher, []byte(plainstring))
+
+	aliceCipher, err := GetPublickeyCipher(pass, salt, alicekey, bobpub)
+	if err != nil {
+		t.Fatalf("Failed to get decrypt cipher: %v", err)
+	}
+	decryptedData, err := DecryptString(aliceCipher, cipherstring)
+	if err != nil {
+		t.Fatalf("Failed to decrypt: %v", err)
+	}
+	if plainstring != string(decryptedData) {
 		t.Fatalf("Decrypted data not correct")
 	}
 }

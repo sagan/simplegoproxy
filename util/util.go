@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
@@ -177,7 +178,7 @@ func fetchUnix(req *http.Request) (*http.Response, error) {
 	}
 	resourceUrlObj, err := url.Parse(resourceUrl)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse unix domain socket resource url: %v", err)
+		return nil, fmt.Errorf("failed to parse unix domain socket resource url: %w", err)
 	}
 	dummyUrl := "http://unix/" + strings.TrimPrefix(resourceUrlObj.Path, "/")
 	if req.URL.RawQuery != "" {
@@ -193,16 +194,16 @@ func fetchFile(req *http.Request) (*http.Response, error) {
 	}
 	stat, err := os.Stat(localfilepath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat file %q: %v", localfilepath, err)
+		return nil, fmt.Errorf("failed to stat file %q: %w", localfilepath, err)
 	}
 	if stat.Mode().IsDir() {
 		tpl, err := template.New("template").Parse(constants.DIR_INDEX_HTML)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile dir index template: %v", err)
+			return nil, fmt.Errorf("failed to compile dir index template: %w", err)
 		}
 		entries, err := os.ReadDir(localfilepath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read dir: %v", err)
+			return nil, fmt.Errorf("failed to read dir: %w", err)
 		}
 		files := []map[string]any{}
 		for _, entry := range entries {
@@ -227,7 +228,7 @@ func fetchFile(req *http.Request) (*http.Response, error) {
 			"Files":  files,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to render dir template: %v", err)
+			return nil, fmt.Errorf("failed to render dir template: %w", err)
 		}
 		res := &http.Response{
 			StatusCode: http.StatusOK,
@@ -323,12 +324,12 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 	}
 	if ip.Ja3 != "" {
 		if err := session.ApplyJa3(ip.Ja3, ip.Navigator); err != nil {
-			return nil, fmt.Errorf("failed to set ja3: %v", err)
+			return nil, fmt.Errorf("failed to set ja3: %w", err)
 		}
 	}
 	if ip.H2fingerprint != "" {
 		if err := session.ApplyHTTP2(ip.H2fingerprint); err != nil {
-			return nil, fmt.Errorf("failed to set h2 finterprint: %v", err)
+			return nil, fmt.Errorf("failed to set h2 finterprint: %w", err)
 		}
 	}
 	if netreq.Proxy == "" {
@@ -336,7 +337,7 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 	}
 	if netreq.Proxy != "" {
 		if err := session.SetProxy(netreq.Proxy); err != nil {
-			return nil, fmt.Errorf("failed to set proxy: %v", err)
+			return nil, fmt.Errorf("failed to set proxy: %w", err)
 		}
 	}
 	if netreq.Insecure {
@@ -380,9 +381,9 @@ func fetchHttp(netreq *NetRequest) (*http.Response, error) {
 	}, orderedHeaders)
 	if err != nil {
 		if _, ok := err.(net.Error); ok {
-			return nil, fmt.Errorf("failed to fetch url: <network error>: %v", err)
+			return nil, fmt.Errorf("failed to fetch url: <network error>: %w", err)
 		}
-		return nil, fmt.Errorf("failed to fetch url: %v", err)
+		return nil, fmt.Errorf("failed to fetch url: %w", err)
 	}
 	// For some reason, azuretls returns "content-encoding: gzip/br" header AND non-comprerss plain body for some url.
 	// e.g.: whoami ( https://github.com/traefik/whoami ) page.
@@ -510,7 +511,7 @@ func fetchCurl(netreq *NetRequest) (res *http.Response, err error) {
 		data, err := io.ReadAll(req.Body)
 		req.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("failed to read request body: %v", err)
+			return nil, fmt.Errorf("failed to read request body: %w", err)
 		}
 		if len(data) > 0 {
 			args = append(args, "--data-raw", string(data))
@@ -587,11 +588,11 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 	statcmd := exec.CommandContext(req.Context(), rcloneBinary, statargs...)
 	statstr, err := statcmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get rclone item stat [%v]: %v", statargs, err)
+		return nil, fmt.Errorf("failed to get rclone item stat [%v]: %w", statargs, err)
 	}
 	var stat *rcloneLsjsonItem
 	if err = json.Unmarshal(statstr, &stat); err != nil {
-		return nil, fmt.Errorf("failed to parse rclone stat: %v", err)
+		return nil, fmt.Errorf("failed to parse rclone stat: %w", err)
 	}
 
 	if stat.IsDir {
@@ -602,15 +603,15 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 		cmd := exec.CommandContext(req.Context(), rcloneBinary, args...)
 		out, err := cmd.Output()
 		if err != nil {
-			return nil, fmt.Errorf("failed to list rclone dir [%v]: %v", args, err)
+			return nil, fmt.Errorf("failed to list rclone dir [%v]: %w", args, err)
 		}
 		var entries []*rcloneLsjsonItem
 		if err = json.Unmarshal(out, &entries); err != nil {
-			return nil, fmt.Errorf("failed to parse rclone lsjson: %v", err)
+			return nil, fmt.Errorf("failed to parse rclone lsjson: %w", err)
 		}
 		tpl, err := template.New("template").Parse(constants.DIR_INDEX_HTML)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile dir index template: %v", err)
+			return nil, fmt.Errorf("failed to compile dir index template: %w", err)
 		}
 		buf := &bytes.Buffer{}
 		err = tpl.Execute(buf, map[string]any{
@@ -619,7 +620,7 @@ func fetchRclone(netreq *NetRequest) (*http.Response, error) {
 			"Files":  entries,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to render dir template: %v", err)
+			return nil, fmt.Errorf("failed to render dir template: %w", err)
 		}
 		res := &http.Response{
 			StatusCode: http.StatusOK,
@@ -998,7 +999,7 @@ func ParseExecUrlFilepath(urlObj *url.URL) string {
 func getArgs(queryParams url.Values) (args []string, err error) {
 	if queryParams.Has("args") {
 		if args, err = shlex.Split(queryParams.Get("args")); err != nil {
-			return nil, fmt.Errorf("invalid arags: %v", err)
+			return nil, fmt.Errorf("invalid arags: %w", err)
 		}
 	} else {
 		args = queryParams["arg"]
@@ -1097,6 +1098,43 @@ func DecryptString(cipher cipher.AEAD, ciphertext string) (plaindata []byte, err
 	return Decrypt(cipher, cipherdata)
 }
 
+// Return a AES-256-GCM cipher using key derived from either or both of passphrase and ECDH key exchange.
+// privatekey & remotePublickey should be generated by Curve25519.
+// To generate privatekey: ecdh.X25519().GenerateKey(rand.Reader).
+func GetPublickeyCipher(passphrase string, salt string, privatekey *ecdh.PrivateKey, remotePublickey *ecdh.PublicKey) (
+	c cipher.AEAD, err error) {
+	if passphrase == "" && privatekey == nil {
+		return nil, fmt.Errorf("at least one of passphrase and privatekey must be set")
+	}
+	var key []byte
+	if passphrase != "" {
+		key = pbkdf2.Key([]byte(passphrase), []byte(salt), 1000000, 32, sha256.New)
+	}
+	if privatekey != nil {
+		// Curve25519 ECDH generate 32 bytes secret
+		secret, err := privatekey.ECDH(remotePublickey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to derive ecdh shared secret: %w", err)
+		}
+		if key != nil {
+			for i := range key {
+				key[i] ^= secret[i]
+			}
+		} else {
+			key = secret
+		}
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	c, err = cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 // Get a cipher from passphrase and salt
 func GetCipher(passphrase string, salt string) (cipher.AEAD, error) {
 	if passphrase == "" {
@@ -1132,7 +1170,7 @@ func IsTextualMediaType(mediatype string) bool {
 func Unmarshal(contentType string, input io.Reader) (data any, err error) {
 	body, err := io.ReadAll(input)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read input: %v", err)
+		return nil, fmt.Errorf("failed to read input: %w", err)
 	}
 	if strings.ContainsRune(contentType, '/') {
 		contentType = MediaType(contentType)

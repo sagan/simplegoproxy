@@ -366,6 +366,12 @@ export default function Home({}) {
                 indexfile
               </option>
               <option
+                title="Append a default ext to url if it doesn't has a ext suffix, e.g. 'html' or '.html'"
+                value="defaultext"
+              >
+                defaultext
+              </option>
+              <option
                 value="tplpath"
                 title="Do response template if the url path ends with this value (suffix), e.g. '.txt'"
               >
