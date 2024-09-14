@@ -8,6 +8,7 @@ require (
 	github.com/dop251/goja v0.0.0-20240828124009-016eb7256539
 	github.com/dop251/goja_nodejs v0.0.0-20240728170619-29b559befffc
 	github.com/gomarkdown/markdown v0.0.0-20240730141124-034f12af3bf6
+	github.com/google/btree v1.1.3
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/icholy/replace v0.6.0
 	github.com/jxskiss/base62 v1.1.0

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/btree"
 	"github.com/sagan/simplegoproxy/admin"
 	"github.com/sagan/simplegoproxy/auth"
 	"github.com/sagan/simplegoproxy/constants"
@@ -120,13 +121,16 @@ func main() {
 	// prefix & path always starts and ends with "/".
 	// e.g.: ["/abc/", "/_sgp_sub_ip=//ipinfo.io/", "/_sgp_sub_ip=%2F/ipinfo.io/"] .
 	var aliases = [][3]string{}
-	for _, a := range flags.Aliases {
-		prefix, path, found := strings.Cut(a, "=")
+	for _, alias := range flags.Aliases {
+		prefix, path, found := strings.Cut(alias, "=")
 		if !found || prefix == "" || path == "" {
-			log.Fatalf("invalid alias %q", a)
+			log.Fatalf("invalid alias %q", alias)
 		}
 		prefix, _ = normalizeUrlPath(prefix)
 		path, rawpath := normalizeUrlPath(path)
+		if !strings.HasPrefix(path, flags.Rootpath) || !strings.HasPrefix(rawpath, flags.Rootpath) {
+			log.Fatalf("invalid alias %q", alias)
+		}
 		aliases = append(aliases, [3]string{prefix, path, rawpath})
 	}
 	slices.SortFunc(aliases, func(a, b [3]string) int { return len(b[0]) - len(a[0]) })
@@ -154,15 +158,17 @@ func main() {
 		fmt.Printf("WARNING! Enabing non-http schemes without using signing is risky. You should only do it in local / test / sandbox env\n")
 	}
 	authenticator := auth.NewAuthenticator("website", false)
+	nonceTree := btree.NewG[constants.Nonce](4, constants.NonceLess)
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.OpenScopes, flags.OpenNormal,
 			flags.SupressError, flags.Log, flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl,
-			flags.EnableExec, flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher, authenticator)
+			flags.EnableExec, flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher, authenticator,
+			nonceTree)
 	}))
 	adminHandle := http.StripPrefix(flags.Adminpath, admin.GetHttpHandle())
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244
 	err = http.ListenAndServe(flags.Addr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// We use fragment as a internal context flags holder. So make sure it's firstly cleared.
+		// We use fragment as a internal context variables holder. So make sure it's firstly cleared.
 		r.URL.Fragment = ""
 		if strings.HasPrefix(r.URL.Path, flags.Adminpath) {
 			adminHandle.ServeHTTP(w, r)
@@ -177,13 +183,20 @@ func main() {
 					http.NotFound(w, r)
 					return
 				}
+				if rp == "" {
+					rp = url.PathEscape(p)
+				}
 				r2 := new(http.Request)
 				*r2 = *r
 				r2.URL = new(url.URL)
 				*r2.URL = *r.URL
 				r2.URL.Path = alias[1] + p
 				r2.URL.RawPath = alias[2] + rp
-				r2.URL.Fragment = constants.REQ_INALIAS
+				var reqparams = url.Values{
+					constants.REQ_INALIAS: []string{"1"},
+					constants.REQ_RPATH:   []string{rp},
+				}
+				r2.URL.Fragment = reqparams.Encode()
 				proxyHandle.ServeHTTP(w, r2)
 				return
 			}

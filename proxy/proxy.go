@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/console"
 	"github.com/dop251/goja_nodejs/require"
+	"github.com/google/btree"
 	"github.com/icholy/replace"
 	"github.com/vincent-petithory/dataurl"
 	"golang.org/x/text/transform"
@@ -38,6 +40,16 @@ import (
 	"github.com/sagan/simplegoproxy/flags"
 	"github.com/sagan/simplegoproxy/tpl"
 	"github.com/sagan/simplegoproxy/util"
+)
+
+const (
+	ENCMODE_BINARY_OUTPUT        = 1 << iota // bit 0, output binary instead of base64
+	ENCMODE_BODY_ONLY                        // bit 1, only encrypt response body (do not protect header)
+	ENCMODE_WHOLE_MODE                       // bit 2, whole meta + body in encrypted body
+	ENCMODE_ORIGINAL_BODY_TEXT               // bit 3, Force treat original body as string
+	ENCMODE_ORIGINAL_BODY_BINARY             // bit 4, Force treat original body as binary (base64)
+	ENCMODE_LOCALSIGN                        // bit 5, enable localsign
+	ENCMODE_LOCALSIGN_ONLY                   // bit 6, no encryption, only localsign.
 )
 
 const (
@@ -75,6 +87,7 @@ const (
 	ORIGIN_STRING          = "origin"
 	SCOPE_STRING           = "scope"
 	SIGN_STRING            = "sign"
+	LOCALSIGN_STRING       = "localsign"
 	KEYTYPE_STRING         = "keytype"
 	VALIDBEFORE_STRING     = "validbefore"
 	VALIDAFTER_STRING      = "validafter"
@@ -92,6 +105,7 @@ const (
 	DEBUG_STRING           = "debug"
 	EPATH_STRING           = "epath" // allow subpath in encrypted url
 	SALT_STRING            = "salt"
+	NONCE_STRING           = "nonce"
 	PUBLICKEY_STRING       = "publickey"
 	FLAG_STRING            = "flag"
 	ARG_SRING              = "arg"
@@ -99,12 +113,14 @@ const (
 )
 
 // These params do not participate in url signing: sign, keytype, salt.
-var NoSignParameters = []string{SIGN_STRING, KEYTYPE_STRING, SALT_STRING, PUBLICKEY_STRING}
+var NoSignParameters = []string{SIGN_STRING, KEYTYPE_STRING, SALT_STRING, PUBLICKEY_STRING,
+	NONCE_STRING, LOCALSIGN_STRING}
 
-// These params are allowed in query string of an alias url: salt, publickey.
-var AliasUrlAllowedQueryParameters = []string{SALT_STRING, PUBLICKEY_STRING}
+// These params are allowed in query string of an alias or enrypt url: salt, publickey, nonce.
+var EphemeralQueryParameters = []string{SALT_STRING, PUBLICKEY_STRING, NONCE_STRING, LOCALSIGN_STRING}
 
 var errNotFound = fmt.Errorf("404 not found")
+var mu sync.Mutex
 
 func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg string, args ...any) {
 	errormsg := fmt.Sprintf(msg, args...)
@@ -121,15 +137,21 @@ func sendError(w http.ResponseWriter, r *http.Request, supress, dolog bool, msg 
 
 func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keytypeBlacklist, openScopes []string,
 	openNormal, supressError, doLog bool, enableUnix, enableFile, enableRclone, enableCurl, enableExec bool,
-	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD, authenticator *auth.Auth) {
+	rcloneBinary, rcloneConfig, curlBinary string, cipher cipher.AEAD, authenticator *auth.Auth,
+	nonceTree *btree.BTreeG[constants.Nonce]) {
 	defer r.Body.Close()
 	// in alias mode, url is treated as if signed, but most mod params can not exists in query variables
 	var inalias = false
+	var rpath string
 	if r.URL.Fragment != "" {
-		for _, flag := range util.SplitCsv(r.URL.Fragment) {
-			switch flag {
-			case constants.REQ_INALIAS:
-				inalias = true
+		if values, err := url.ParseQuery(r.URL.Fragment); err == nil {
+			for name := range values {
+				switch name {
+				case constants.REQ_INALIAS:
+					inalias = true
+				case constants.REQ_RPATH:
+					rpath = values.Get(name)
+				}
 			}
 		}
 		r.URL.Fragment = ""
@@ -137,7 +159,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 	srcUrlQuery := r.URL.Query()
 	if inalias {
 		for key := range srcUrlQuery {
-			if strings.HasPrefix(key, prefix) && !slices.Contains(AliasUrlAllowedQueryParameters, key[len(prefix):]) {
+			if strings.HasPrefix(key, prefix) && !slices.Contains(EphemeralQueryParameters, key[len(prefix):]) {
 				srcUrlQuery.Del(key)
 			}
 		}
@@ -180,7 +202,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 					for _, value := range values {
 						reqUrlQuery.Add(key, value)
 					}
-				} else if key == prefix+SALT_STRING {
+				} else if name := key[len(prefix):]; slices.Contains(EphemeralQueryParameters, name) {
 					reqUrlQuery.Set(key, srcUrlQuery.Get(key))
 				}
 			}
@@ -192,6 +214,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		}
 		targetUrlObj.RawQuery = ""
 		targetUrl = targetUrlObj.String()
+		rpath = strings.TrimPrefix(epath, "/")
 	}
 
 	var modparams url.Values
@@ -279,8 +302,9 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 			return
 		}
 	}
-	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist,
-		openScopes, openNormal, rcloneBinary, rcloneConfig, encryltedUrlPath, authenticator, inalias, doLog)
+
+	response, err := FetchUrl(targetUrlObj, r, queryParams, prefix, key, keytypeBlacklist, openScopes, openNormal,
+		rcloneBinary, rcloneConfig, encryltedUrlPath, authenticator, inalias, rpath, nonceTree, doLog)
 	if err != nil {
 		if err == errNotFound {
 			sendError(w, r, true, doLog, "backend returns 404 not found")
@@ -305,7 +329,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 
 func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, prefix, signkey string, keytypeBlacklist,
 	openScopes []string, openNormal bool, rcloneBinary, rcloneConfig, encryltedUrlPath string, authenticator *auth.Auth,
-	inalias, doLog bool) (*http.Response, error) {
+	inalias bool, rpath string, nonceTree *btree.BTreeG[constants.Nonce], doLog bool) (*http.Response, error) {
 	originalUrlObj := *urlObj
 	isSigned := queryParams.Get(SIGN_STRING) != ""
 	if !inalias || isSigned {
@@ -324,6 +348,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			}
 		}
 	}
+	now := time.Now().UTC()
+	nowTimestamp := now.Unix()
 
 	var err error
 	header := http.Header{}
@@ -366,7 +392,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var status = 0
 	keytype := ""
 	sign := ""
+	localsign := ""
 	salt := ""
+	nonce := ""
 	publickey := ""
 	indexfile := ""
 	defaultext := ""
@@ -393,7 +421,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			return nil, fmt.Errorf("invalid flag: %w", err)
 		}
 	}
-	now := time.Now().Unix()
 	for key := range queryParams {
 		var values []string
 		values = append(values, queryParams[key]...)
@@ -447,6 +474,13 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			subtypes = parseArrayParameters(sgpflag, values, false, normalizeTypeParameter)
 		case SALT_STRING:
 			salt = value
+		case LOCALSIGN_STRING:
+			localsign = value
+		case NONCE_STRING:
+			if value != "" && len(value) < constants.NONCE_MIN_LENGTH {
+				return nil, fmt.Errorf("invalid nonce")
+			}
+			nonce = value
 		case PUBLICKEY_STRING:
 			publickey = value
 		case INDEXFILE_STRING:
@@ -517,13 +551,13 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		case VALIDBEFORE_STRING:
 			if validbefore, err := util.ParseLocalDateTime(value); err != nil {
 				return nil, fmt.Errorf("invalid validbefore: %w", err)
-			} else if now > validbefore {
+			} else if nowTimestamp > validbefore {
 				return nil, fmt.Errorf("url expired")
 			}
 		case VALIDAFTER_STRING:
 			if validafter, err := util.ParseLocalDateTime(value); err != nil {
 				return nil, fmt.Errorf("invalid validafter: %w", err)
-			} else if now < validafter {
+			} else if nowTimestamp < validafter {
 				return nil, fmt.Errorf("url doesn't take effect yet")
 			}
 		case SIGN_STRING:
@@ -656,6 +690,56 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if !hmac.Equal(messageMAC, expectedMAC) {
 			return nil, fmt.Errorf(`invalid sign "%s" for url "%s"`, sign, signUrl)
 		}
+	}
+
+	if respass != "" && encmode&(ENCMODE_LOCALSIGN|ENCMODE_LOCALSIGN_ONLY) != 0 {
+		if nonce == "" || localsign == "" {
+			return nil, fmt.Errorf("localsign & nonce is required")
+		}
+		mac := hmac.New(sha256.New, []byte(respass))
+		signurl := rpath
+		query := originalUrlObj.Query()
+		for _, name := range EphemeralQueryParameters {
+			if name == LOCALSIGN_STRING {
+				continue
+			}
+			if value := queryParams.Get(name); value != "" {
+				query.Set(prefix+name, value)
+			}
+		}
+		signurl += "?" + query.Encode()
+		mac.Write([]byte(signurl))
+		sign = hex.EncodeToString(mac.Sum(nil))
+		if sign != localsign {
+			return nil, fmt.Errorf("invalid localsign for %q", signurl)
+		}
+	}
+	mu.Lock()
+	for {
+		minNonce, ok := nonceTree.Min()
+		if !ok {
+			break
+		}
+		if nowTimestamp-minNonce.Time().Unix() <= constants.NONCE_MAX_TIMEDIFF {
+			break
+		}
+		nonceTree.DeleteMin()
+	}
+	mu.Unlock()
+	if nonce != "" {
+		nonceObj := constants.Nonce(nonce)
+		nonceTime := nonceObj.Time()
+		diff := nowTimestamp - nonceTime.Unix()
+		if diff < -constants.NONCE_MAX_TIMEDIFF || diff > constants.NONCE_MAX_TIMEDIFF {
+			return nil, fmt.Errorf("nonce time too early or too late, now: %s, nonce: %s", now, nonceTime)
+		}
+		_, ok := nonceTree.Get(nonceObj)
+		if ok {
+			return nil, fmt.Errorf("duplicate nonce: %s", nonce)
+		}
+		mu.Lock()
+		nonceTree.ReplaceOrInsert(nonceObj)
+		mu.Unlock()
 	}
 
 	if urlObj.Scheme != "data" {
@@ -1116,7 +1200,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		response["Data"] = data
 
 		buf := &bytes.Buffer{}
-		now := time.Now().UTC()
 		contextVariables := map[string]any{
 			"Params": queryParams,
 			"SrcReq": srcRequest,
@@ -1124,7 +1207,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			"Res":    response,
 			"Ctx":    map[string]any{},
 			"Err":    tplerr,
-			"Now":    now,
+			"Now":    time.Now().UTC(),
 		}
 		if jsvm != nil {
 			for key, value := range contextVariables {
@@ -1172,7 +1255,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		res.Header.Set("Content-Type", constants.MIME_HTML)
 	}
 
-	if respass != "" && res.Body != nil {
+	if respass != "" && encmode&ENCMODE_LOCALSIGN_ONLY == 0 && res.Body != nil {
 		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		if err != nil {
@@ -1199,24 +1282,24 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 		mediaType := util.MediaType(res.Header.Get("Content-Type"))
 		var data map[string]any
-		protectHeaders := encmode&4 != 0 || encmode&2 == 0
+		protectHeaders := encmode&ENCMODE_WHOLE_MODE != 0 || encmode&ENCMODE_BODY_ONLY == 0
 		if protectHeaders {
 			data = map[string]any{
 				"status":        res.StatusCode,
 				"header":        res.Header,
 				"encrypted_url": encryltedUrlPath,
 				"request_query": srcReq.URL.RawQuery,
-				"date":          time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+				"date":          time.Now().UTC().Format(constants.TIME_FORMAT),
 				"source_addr":   srcReq.RemoteAddr,
 			}
 			res.StatusCode = http.StatusOK
 			res.Header = http.Header{}
 		}
-		if encmode&4 != 0 { // bit 2: whole meta + body in encrypted body
+		if encmode&ENCMODE_WHOLE_MODE != 0 {
 			bodyIsString := false
-			if encmode&8 != 0 { // bit 3:  Force treat original body as string
+			if encmode&ENCMODE_ORIGINAL_BODY_TEXT != 0 {
 				bodyIsString = true
-			} else if encmode&16 != 0 { // bit 4:  Force treat original body as binary
+			} else if encmode&ENCMODE_ORIGINAL_BODY_BINARY != 0 {
 				bodyIsString = false
 			} else if util.IsTextualMediaType(mediaType) {
 				bodyIsString = true
@@ -1235,7 +1318,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			body = util.Encrypt(cipher, []byte(dataJson))
 		} else {
 			body = util.Encrypt(cipher, body)
-			if encmode&2 == 0 { // bit 1 : encrypt body only
+			if encmode&ENCMODE_BODY_ONLY == 0 {
 				hash := sha256.New()
 				hash.Write(body)
 				sha256hash := hash.Sum(nil)
@@ -1251,7 +1334,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if localPrivatekey != nil {
 			res.Header.Set("X-Encryption-Publickey", base64.StdEncoding.EncodeToString(localPrivatekey.PublicKey().Bytes()))
 		}
-		if encmode&1 != 0 { // bit 0 : sent cipertext as binary (instead of base64)
+		if encmode&ENCMODE_BINARY_OUTPUT != 0 {
 			res.Header.Set("Content-Type", constants.DEFAULT_MIME)
 			res.Body = io.NopCloser(bytes.NewReader(body))
 		} else {

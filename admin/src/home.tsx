@@ -697,15 +697,24 @@ export default function Home({}) {
                   {...register("encmode", { valueAsNumber: true })}
                 >
                   <option value="0">(Default encryption mode) (0)</option>
-                  <option value="1">binary response (1)</option>
-                  <option value="2">body only encryption (2)</option>
+                  <option value="1">Binary response (1)</option>
+                  <option value="2">Body only encryption (2)</option>
                   <option value="3">Binary(1)+BodyOnly(2)</option>
-                  <option value="4">full protection (4)</option>
+                  <option value="4">Full protection (4)</option>
                   <option value="5">Full(4)+Binary(1)</option>
                   <option value="12">Full(4)+TextBody(8)</option>
                   <option value="20">Full(4)+BinBody(16)</option>
                   <option value="13">Full(4)+TextBody(8)+Binary(1)</option>
                   <option value="21">Full(4)+BinBody(16)+Binary(1)</option>
+                  <option value="45">
+                    Full(4)+TextBody(8)+Binary(1)+Sign(32)
+                  </option>
+                  <option value="53">
+                    Full(4)+BinBody(16)+Binary(1)+Sign(32)
+                  </option>
+                  <option value="64" title="Only do localsign, no encryption">
+                    SignOnly (64)
+                  </option>
                 </select>
               </label>
               <label title="Response template mode">

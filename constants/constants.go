@@ -3,11 +3,35 @@ package constants
 import (
 	"io"
 	"regexp"
+	"time"
 )
 
 type Template interface {
 	Execute(wr io.Writer, data any) error
 }
+
+// Nonce must starts with UTC time string of NONCE_TIME_FORMAT and ends with a crypto random string.
+type Nonce string
+
+func (n Nonce) Time() time.Time {
+	t, err := time.Parse(NONCE_TIME_FORMAT, string(n[:len(NONCE_TIME_FORMAT)]))
+	if err != nil {
+		return time.Unix(0, 0)
+	}
+	return t
+}
+
+func NonceLess(a, b Nonce) bool {
+	return a < b
+}
+
+const NONCE_TIME_FORMAT = "2006-01-02_15-04-05"
+
+const NONCE_MIN_LENGTH = len(NONCE_TIME_FORMAT) + 1
+
+const NONCE_MAX_TIMEDIFF = 120 // seconds
+
+const TIME_FORMAT = "2006-01-02T15:04:05Z"
 
 const NONE = "none"
 
@@ -24,6 +48,9 @@ const LINE_BREAKS = "\r\n"
 
 // Current request is a alias parsed url
 const REQ_INALIAS = "inalias"
+
+// Current alias request relative path
+const REQ_RPATH = "rpath"
 
 // seconds of 100 years, aka: infinite.
 const INFINITE_TIMEOUT = 86400 * 365 * 100
