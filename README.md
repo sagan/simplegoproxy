@@ -38,7 +38,10 @@ TOC
   - [URL encryption](#url-encryption)
   - [Request authentication](#request-authentication)
   - [Response encryption](#response-encryption)
+    - [Encryption key salt](#encryption-key-salt)
     - [Public key encryption mode](#public-key-encryption-mode)
+    - [Local signing](#local-signing)
+    - [Encryption best practive](#encryption-best-practive)
     - [How to decrypt](#how-to-decrypt)
   - [Referer restrictions](#referer-restrictions)
   - [Origin restrictions](#origin-restrictions)
@@ -213,11 +216,12 @@ The "Array Value" type parameters can be set multiple times; alternatively, mult
 - `_sgp_keytype=<value>` : The sign key type. See below "Signing key type" section.
 - `_sgp_scope=<value>` : Array Value. The scope of sign. See below "Scope signing" section.
 - `_sgp_eid=<value>` : The encryption url id. See below "URL Encryption" section.
-- `_sgp_epath` : (Value ignored) Enable plaintext children and normal query variables for encrypted url.
+- `_sgp_epath` : (Value ignored) Enable plaintext relative url and normal query variables for encrypted url.
 - `_sgp_status=<value>` : Force set http response status code sent back to client. E.g. `200`, `403`. Special values: `-1` - Use original http response code.
 - `_sgp_auth=user:pass` : The auth username & password for request to the Simplegoproxy server. See below "Request authentication" section.
 - `_sgp_authmode=1` : The request authentication mode. See below "Request authentication" section.
 - `_sgp_respass=<value>` : The password to encrypt the response. See below "Response encrpytion" section.
+- `_sgp_localsign=<value>` : The local scope url sign. See below "Response encrpytion" - "Local signing" section.
 - `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
 - `_sgp_tplmode=1` : The response template mode, bitwise flags integer. See below "Response template" section.
 - `_sgp_tplpath=<value>` : Array Value. Apply response template only if target url path ends with this value. E.g. `.gohtml`.
@@ -606,7 +610,7 @@ It's possible to prepand a fixed `eid` (encrypted url id) string to the beginnin
 
 The target urls are encrypted using "key" flag value as the cryptographic key. If you change the key, all previously generated entrypoint urls will be inaccessible.
 
-If the `_sgp_epath` parameter is set, the encrypted url can also take a suffix of children path and / or normal query variables. For example, if `http://localhost:8380/aabbccddeeff` is the encrypted entrypoint url of `http://example.com/test/`, then `http://localhost:8380/aabbccddeeff/children/path?foo=bar` can be used to access `http://example.com/test/children/path?foo=bar` target url. Note you also need to set the `_sgp_scope` (scope signing) parameter to sign the whole scope target urls, or it will not work.
+If the `_sgp_epath` parameter is set, the encrypted url can also take a suffix of "relative url" and / or normal query variables. For example, if `http://localhost:8380/aabbccddeeff` is the encrypted entrypoint url of `http://example.com/test/`, then `http://localhost:8380/aabbccddeeff/children/path?foo=bar` can be used to access `http://example.com/test/children/path?foo=bar` target url (here the "relative url" is "/path"). Note you also need to set the `_sgp_scope` (scope signing) parameter to sign the whole scope target urls, or it will not work.
 
 ### Request authentication
 
@@ -636,12 +640,16 @@ The `_sgp_encmode` (encryption mode, default to 0) is a bitwise flags integer pa
 - bit 2 (`& 4`) : Make the response body be encrypted data of the a JSON object which has the same structure as above `X-Encryption-Meta` header (without `body_length` and `body_sha256`), plus two string type fields: `body`, `body_encoding`. The `body_encoding` indicates the encoding method of `body`, possibly values: empty string, `base64`.
 - bit 3 (`& 8`) : Used with bit 2 set. Force json "body" field to be original http rersonse string.
 - bit 4 (`& 16`) : Used with bit 2 set. Force json "body" field to be base64 string of original http rersonse.
+- bit 5 (`& 32`) : Enable local signing. (See below)
+- bit 6 (`& 64`) : Only do local signing, no encryption. (See below)
 
-Additionally, if the request client sent has the `_sgp_salt` parameter, it will be used as the salt in PBKDF2 key derivation.
+#### Encryption key salt
+
+If the request client sent has the `_sgp_salt` parameter, it will be used as the salt in PBKDF2 key derivation. It's recommended to set a cryptographically secure random string as salt for each request.
 
 #### Public key encryption mode
 
-Besides above "normal" encryption mode, response encryption supports a "public key" encryption mode that derives AES-256-GCM key from not only the password & salt, but also the [ECDH](https://en.wikipedia.org/wiki/Elliptic-curve_Diffie%E2%80%93Hellman) ([Curve25519](https://en.wikipedia.org/wiki/Curve25519) / X25519) key exchange of a client provided public key and a server generated request scope ephermal private key. This mod is more complicated but provides [forward secrecy](https://en.wikipedia.org/wiki/Forward_secrecy). To use this mode, follow the below procedures:
+Besides above "normal" encryption mode, if the request to the server contains `_sgp_publickey` paramter, response encryption will use a "public key" encryption mode that derives AES-256-GCM key from not only the password & salt, but also the [ECDH](https://en.wikipedia.org/wiki/Elliptic-curve_Diffie%E2%80%93Hellman) ([Curve25519](https://en.wikipedia.org/wiki/Curve25519) / X25519) key exchange of a client provided public key and a server generated request scope ephermal private key. This mode is more complicated but provides [forward secrecy](https://en.wikipedia.org/wiki/Forward_secrecy). To use this mode, follow the below procedures:
 
 1. Client generates a random X25519 private key & public key.
 2. Client sends the request to Simplegoproxy server via encrypted form entrypoint url, put it's public key (hex string) in `_sgp_publickey` parameter of the request.
@@ -654,6 +662,31 @@ To derive the AES-256-GCM key (32 bytes):
 1. Generate the `key` from password & salt using PBKDF2 (the same as "normal" response encryption mode)
 2. Do X25519 ECDH using self (client) private key and remote (server) public key to derive the `key1` (same 32 bytes length).
 3. Apply `key = key ^ key1` (XOR) to derive the final effective AES key.
+
+#### Local signing
+
+The "Public key encryption mode" can provide forward secrecy. However, it cann't prevent [replay attacks](https://en.wikipedia.org/wiki/Replay_attack). To prevent replay attacks, "Response encryption" supports an "local signing" mode which can be enabled by setting `bit 5 (& 32)` flag of `_sgp_encmode`.
+
+In this mode, every request to the encrypted entrypoint url must has some additional parameters:
+
+- `_sgp_nonce`: The [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce) generated by client. Must be in the `2006-01-02_15-04-05XXX` format, the prefix is the current time string (UTC) and the suffix should be a cryptographically secure random string. Server wil reject the request if the time in nonce is too early compared to server time, or the nonce has already be used once recently before.
+- `_sgp_localsign` : The hex string format HMAC-256 sign of "localsign_url" using `_sgp_respass` as the key.
+
+The "localsign_url" is the "relative url" with prefix "/" stripped (could be empty) plus "?" plus all query variables sort by key (except `_sgp_localsign`). For example, if the encrypted entrypoint url is `http://localhost:8380/aabbccddeeff` :
+
+- `http://localhost:8380/aabbccddeeff?_sgp_nonce=...&_sgp_localsign=...` : The "localsign_url" is `?_sgp_nonce=...`.
+- `http://localhost:8380/aabbccddeeff/foo?_sgp_nonce=...&_sgp_publickey=...&_sgp_localsign=...` : The "localsign_url" is `foo?_sgp_nonce=...&_sgp_publickey=...`.
+
+Notes:
+
+- If the entrypoint url is an "alias" url, the relative url is the part of url path provided by the user.
+- If the `bit 6 (& 64)` flag of `_sgp_encmode` is set, it only requires request signed by the above local signing procedure, but the response is not encrypted at all.
+
+#### Encryption best practive
+
+To archive the best level of security, combine the "Public key encryption mode" with "Local signing".
+
+Use only "public key encryption mode" without "Local signing" can not reliably provide forward secrecy, as the attacker can actively send a request without "pubkey" to server and save the opaque encrypted response for future use.
 
 #### How to decrypt
 
@@ -693,7 +726,7 @@ async function aesGcmDecrypt(ciphertext, password, salt = "") {
 }
 ```
 
-For example of decrypting "public key encryption mode" response, see [docs/decrypt.js](https://github.com/sagan/simplegoproxy/blob/master/docs/decrypt.js).
+For example of more complicated usages like do local signing or decrypting "public key encryption mode" response, see [docs/decrypt.js](https://github.com/sagan/simplegoproxy/blob/master/docs/decrypt.js).
 
 ### Referer restrictions
 

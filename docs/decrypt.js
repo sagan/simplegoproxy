@@ -1,12 +1,44 @@
+const { parseArgs } = require("util");
+
+// node decrypt.js --url "http://localhost:8380/xxx" --password abc --localsign --publickey
+
 // Fetch a Simplegoproxy entrypoint url with encrypted response and decrypt it.
 // Assume Simplegoproxy server is using default "_sgp_" prefix.
 // Should works in recent node.js & browsers.
 (async function main() {
-  let url = "http://localhost:8380/abcdefghijklmnopqrstuvwxyz";
-  let password = "abc";
-  let usePublickey = true;
-  let plaintext = await fetchAndDecrypt(url, password, usePublickey);
-  console.log("plaintext:", plaintext);
+  const {
+    values: { url, suburl, password, localsign, publickey, nodecrypt },
+  } = parseArgs({
+    options: {
+      url: {
+        type: "string",
+      },
+      suburl: {
+        type: "string",
+      },
+      password: {
+        type: "string",
+      },
+      localsign: {
+        type: "boolean",
+      },
+      publickey: {
+        type: "boolean",
+      },
+      nodecrypt: {
+        type: "boolean",
+      },
+    },
+  });
+  let plaintext = await fetchAndDecrypt({
+    url,
+    suburl,
+    password,
+    localsign,
+    publickey,
+    nodecrypt,
+  });
+  console.log("plaintext\n", plaintext);
 })();
 
 /**
@@ -49,14 +81,18 @@ function bytesToBase64(bytes) {
   return btoa(binString);
 }
 
-// hex string => Uint8Array
+/**
+ * hex string => Uint8Array
+ */
 function fromHexString(hexString) {
   return new Uint8Array(
     hexString.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
   );
 }
 
-// Uint8Array / ArrayBuffer => hex string
+/**
+ * Uint8Array / ArrayBuffer => hex string
+ */
 function toHexString(arr) {
   if (arr instanceof ArrayBuffer) {
     arr = new Uint8Array(arr);
@@ -67,23 +103,44 @@ function toHexString(arr) {
 /**
  * Fetch a encrypted url and decrypt it.
  * @param url String. The entrypoint url of Simplegoproxy with "response encryption" enabled.
+ * @param suburl String. The suburl, which will be concated to url.
  * @param password String. The response encryption password. The symmetric AES-256-GCM key is derived from password.
- * @param usePublickey Bool. If true, will generate a ephemeral X25519 key and do ECDH with server.
- * In this case, the symmetric AES-256-GCM key is derived from both the password and the ECDH.
- * This will provide forward secrecy, but will be much slower.
+ * @param publickey Bool. If true, will generate a ephemeral X25519 key and do ECDH with server.
+ *  In this case, the symmetric AES-256-GCM key is derived from both the password and the ECDH.
+ *  This will provide forward secrecy, but will be much slower.
+ * @param nodecrypt Bool. If true, the response is not encrypted.
+ *  This flag should be set when and only when the unecrypted form or url has encmode&(64) != 0.
+ * @param localsign Bool. If true, do local signing of suburl using password. It will prevent replay attacks.
+ *  This flag should be set when and only when the unecrypted form or url has encmode&(32 || 64) != 0.
+ * @param prefix String. The modification parameter prefix. Default is "_sgp_".
  * @returns Promise of string. The decrypted response plaintext.
  */
-async function fetchAndDecrypt(url, password, usePublickey) {
-  if (url.indexOf("?") == -1) {
-    url += "?";
-  } else if (!url.endsWith("?") && !url.endsWith("&")) {
-    url += "&";
+async function fetchAndDecrypt({
+  url = "",
+  suburl = "",
+  password = "",
+  localsign = false,
+  publickey = false,
+  nodecrypt = false,
+  prefix = "_sgp_",
+} = {}) {
+  if (url == "" || password == "") {
+    throw new Error("url must be set");
   }
+  if (suburl != "") {
+    if (!url.endsWith("/")) {
+      url += "/";
+    }
+    if (suburl.startsWith("/")) {
+      suburl = suburl.substring(1);
+    }
+  }
+  let params = new URLSearchParams();
   let salt = generateRandomString(32);
-  url += "_sgp_salt=" + salt + "&";
+  params.set(prefix + "salt", salt);
 
   let privatekey;
-  if (usePublickey) {
+  if (publickey) {
     let keypair = await crypto.subtle.generateKey(
       {
         name: "X25519",
@@ -92,9 +149,52 @@ async function fetchAndDecrypt(url, password, usePublickey) {
       ["deriveKey"]
     );
     let publicKeyData = await crypto.subtle.exportKey("raw", keypair.publicKey);
-    url += "_sgp_publickey=" + toHexString(publicKeyData) + "&";
     privatekey = keypair.privateKey;
+    params.set(prefix + "publickey", toHexString(publicKeyData));
   }
+
+  if (localsign) {
+    let index = suburl.indexOf("?");
+    if (index != -1) {
+      let queryparams = new URLSearchParams(suburl.substring(index));
+      suburl = suburl.substring(0, index);
+      for (let [key, value] of queryparams) {
+        params.append(key, value);
+      }
+    }
+    // '2024-09-19T04:40:08.934Z'
+    let ts = new Date().toISOString().substring(0, 19);
+    ts = ts.replace("T", "_");
+    ts = ts.replace(/:/g, "-");
+    ts += generateRandomString(20); // "2024-09-19_04-40-08XXX..."
+    params.set(prefix + "nonce", ts);
+    params.sort();
+    let signurl = suburl + "?" + params.toString();
+    let localsignkey = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(password),
+      {
+        name: "HMAC",
+        hash: { name: "SHA-256" },
+      },
+      false,
+      ["sign", "verify"]
+    );
+    let localsign = await crypto.subtle.sign(
+      "HMAC",
+      localsignkey,
+      new TextEncoder().encode(signurl)
+    );
+    params.set(prefix + "localsign", toHexString(localsign));
+  }
+
+  url += suburl;
+  if (url.indexOf("?") == -1) {
+    url += "?";
+  } else if (!url.endsWith("?") && !url.endsWith("&")) {
+    url += "&";
+  }
+  url += params.toString();
 
   const keymaterial = await crypto.subtle.importKey(
     "raw",
@@ -116,9 +216,23 @@ async function fetchAndDecrypt(url, password, usePublickey) {
     ["encrypt", "decrypt"]
   );
 
+  console.log("fetch", url);
   const res = await fetch(url);
-  const ciphertext = await res.text();
-  const cipherdata = base64ToBytes(ciphertext);
+  if (res.status != 200) {
+    throw new Error(`Server return status ${res.status}`);
+  }
+  if (nodecrypt) {
+    return await res.text();
+  }
+  let cipherdata = new Uint8Array();
+  let restype = res.headers.get("Content-Type");
+  if (restype == "application/octet-stream") {
+    cipherdata = new Uint8Array(await res.arrayBuffer());
+  } else if (restype == "text/plain; charset=utf-8") {
+    cipherdata = base64ToBytes(await res.text());
+  } else {
+    throw new Error(`Invalid response content type ${restype}`);
+  }
 
   if (privatekey) {
     let remotePublickey = await crypto.subtle.importKey(

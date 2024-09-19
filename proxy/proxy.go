@@ -214,7 +214,9 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		}
 		targetUrlObj.RawQuery = ""
 		targetUrl = targetUrlObj.String()
-		rpath = strings.TrimPrefix(epath, "/")
+		if rpath == "" {
+			rpath = strings.TrimPrefix(epath, "/")
+		}
 	}
 
 	var modparams url.Values
@@ -263,7 +265,7 @@ func ProxyFunc(w http.ResponseWriter, r *http.Request, prefix, key string, keyty
 		queryParams[key[len(prefix):]] = values
 	}
 	if doLog {
-		log.Printf("Fetch: url=%s, params=%v, src=%s", targetUrlObj, queryParams, r.RemoteAddr)
+		log.Printf("Fetch: url=%s, params=%v, src=%s, rpath=%s", targetUrlObj, queryParams, r.RemoteAddr, rpath)
 	}
 	if encryltedUrlPath == "" && !inalias && (queryParams.Has(RESPASS_STRING) || queryParams.Has(AUTH_STRING)) {
 		sendError(w, r, supressError, doLog, "url with auth or respass must be accessed via encrypted url")
