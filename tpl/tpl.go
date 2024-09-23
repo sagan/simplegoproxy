@@ -2,6 +2,7 @@ package tpl
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -13,16 +14,16 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/google/shlex"
+
 	"github.com/sagan/simplegoproxy/util"
 )
 
 const NOBODY = "NOBODY"
+const INSECURE = "INSECURE"
 
 // Additional template functions, require url to be signed.
 // Due to the pipeline way that Go template works, the last argument of funcs shoud be the primary one.
 var TemplateFuncMap = map[string]any{
-	"btoa":           btoa,
-	"atob":           atob,
 	"marshal":        marshal,
 	"unmarshal":      unmarshal,
 	"randstring":     randstring,
@@ -37,17 +38,6 @@ var TemplateFuncMap = map[string]any{
 	"fetch":          fetch,
 	"system":         system,
 	"exec":           execFunc,
-}
-
-// Base64 decode
-func atob(input any) string {
-	output, _ := base64.StdEncoding.DecodeString(Any2string(input))
-	return string(output)
-}
-
-// Base64 encode
-func btoa(input any) string {
-	return base64.StdEncoding.EncodeToString([]byte(Any2string(input)))
 }
 
 // Convert input to int. if failed to parse input as int, return 0.
@@ -134,6 +124,7 @@ func fetch(options ...string) *Response {
 		http.MethodHead}
 	urlStr := ""
 	nobody := false
+	insecure := false
 	method := http.MethodGet
 	header := http.Header{}
 	var body io.ReadCloser
@@ -145,6 +136,8 @@ func fetch(options ...string) *Response {
 			urlStr = option
 		case option == NOBODY:
 			nobody = true
+		case option == INSECURE:
+			insecure = true
 		case slices.Contains(methods, option):
 			method = option
 		case strings.HasPrefix(option, "@"):
@@ -168,7 +161,16 @@ func fetch(options ...string) *Response {
 	req.Header = header
 	req.Body = body
 
-	res, err := http.DefaultClient.Do(req)
+	var client *http.Client
+	if insecure {
+		client = &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}}
+	} else {
+		client = http.DefaultClient
+	}
+
+	res, err := client.Do(req)
 	if err != nil {
 		response.Err = err
 		return response

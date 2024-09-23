@@ -23,6 +23,10 @@ TOC
   - [Response body substitutions](#response-body-substitutions)
   - [Impersonate the Browser](#impersonate-the-browser)
   - [Response template](#response-template)
+    - [The template context](#the-template-context)
+    - [Template mode](#template-mode)
+    - [Template examples](#template-examples)
+    - [JavaScript template](#javascript-template)
   - [Admin UI](#admin-ui)
   - ["data:" urls](#data-urls)
   - [`unix://`, `file://`, `rclone://`, `curl+*//`, `exec://` urls](#unix-file-rclone-curl-exec-urls)
@@ -64,7 +68,7 @@ Command-line flag arguments:
   -addr string
         Http listening addr, e.g. "127.0.0.1:8380" or ":8380" or just "8380" (port only). If not set, will listen on "0.0.0.0:8380" (default "0.0.0.0:8380")
   -adminpath string
-        Admin UI path. Default is <rootpath> + "admin/"
+        Admin UI path. Default is <rootpath> + "admin/". Set to "none" to disable admin ui
   -alias value
         Aliases. Array List. Each one format: "prefix=path"
   -basic-auth
@@ -119,6 +123,8 @@ Command-line flag arguments:
         Root path (with leading and trailing slash) (default "/")
   -sign
         Calculate the sign of target url and output result. The "key" flag need to be set. Args are url(s)
+  -sitename string
+        The site name (default "SGP")
   -supress-error
         Supress error display, send a 404 to client instead
   -user string
@@ -224,8 +230,9 @@ The "Array Value" type parameters can be set multiple times; alternatively, mult
 - `_sgp_localsign=<value>` : The local scope url sign. See below "Response encrpytion" - "Local signing" section.
 - `_sgp_encmode=4` : The response encryption mode, bitwise flags integer. See below "Response encrpytion" section.
 - `_sgp_tplmode=1` : The response template mode, bitwise flags integer. See below "Response template" section.
-- `_sgp_tplpath=<value>` : Array Value. Apply response template only if target url path ends with this value. E.g. `.gohtml`.
+- `_sgp_tplpath=<value>` : Array Value. Apply response template only if target url path ends with this value. E.g. `.gohtml`. Set to `*` to apply to any url.
 - `_sgp_tpltype=<value>` : Array Value. Apply response template only if target url original response has this content type. E.g. `txt`, `text/plain`. Use empty string to match original response which does not have a "Content-Type" header. Use `*` to accept all content types.
+- `_sgp_jstplpath=<value>` : Array Value. Use JavaScript template if target url path ends with this value. E.g. `.tpl.js`. Set to `*` to apply to any url.
 - `_sgp_mutestatus=<value>` : Array Value. If the target url original response has this status code, "mute" this response (discard this reponse and sent a standard 404 not found page to client instead). Possible values:
   - `*` : All status codes except `200` and `206`.
   - `!xxx` : All non-xxx status codes. E.g. `!200`.
@@ -297,7 +304,9 @@ if `_sgp_resbody` parameter is set, Simplegoproxy use it as a [Go template](http
 {{.Res.Body}}
 ```
 
-The context (available variables):
+#### The template context
+
+Some context variables are available in template:
 
 - `Params` : The all `_sgp_*` parameters of current request (param names don't have `_sgp_` prefix). type: [url.Values](https://pkg.go.dev/net/url#Values).
 - `Res` : The original http response sent by the target url server.
@@ -333,13 +342,13 @@ Notes:
 
 If current entrypoint url is signed, some more pre-defined functions are available in template:
 
-- `atob` and `btoa`, Do base64 decoding / enccoding similar to JavaScript's same name [functions](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob).
 - `fetch(options...)` : Do a arbitary http request, return `{Err, Status, Header, RawBody, Body, Data}`.
   - The `options` args is an string array which elements could be any of:
     - http method: e.g. `GET`.
     - http header: e.g. `Content-Type: text/plain`.
     - http request body: starts with `@`, e.g. `@a=1&b=2`.
     - `NOBODY` : special flag, do not read and parse response body.
+    - `INSECURE` : special flag, disable request TLS cert verification.
     - A string starts with `https://` or `http://` : the target url to fetch.
   - `Body`, `Data`: The response body string and parsed data object. Set when `NOBODY` flag is not present.
   - `RawBody`: The raw response body (`io.ReadCloser`). Set when `NOBODY` flag is present.
@@ -355,6 +364,7 @@ If current entrypoint url is signed, some more pre-defined functions are availab
 - `eval(input)` : Evaluate an JavaScript snippet using [goja](https://github.com/dop251/goja) JavaScript engine, return result.
   - The above context variables are also available in JavaScript runtime.
   - `console` functions (e.g. `console.log`) are available in JavaScript runtime, which will output to stderr of Simplegoproxy process.
+  - Some above functions (e.g. `fetch`, `exec`, `set_status`...) are also available in JavaScript runtime. Note that the `fetch` function is different from ECMA [fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API). For list of all available functions, see [tpl/js.go](https://github.com/sagan/simplegoproxy/blob/master/tpl/js.go).
   - To interchange data between normal template runtime and JavaScript runtime, use `Ctx` context variable.
   - If `eval` returns a Promise, the resolved value will be used as result.
   - Other template functions (like `set_body`) also support Promise generated by JavaScript runtime as arg.
@@ -362,6 +372,8 @@ If current entrypoint url is signed, some more pre-defined functions are availab
 - ....
 - For full func list, see [tpl/tpl.go](https://github.com/sagan/simplegoproxy/blob/master/tpl/tpl.go).
 - Plus with all functions from Go [Sprig](https://github.com/Masterminds/sprig) library.
+
+#### Template mode
 
 The `_sgp_tplmode` (template mode, default to 0) is a bitwise flags integer parameter that can control several response template behaviors:
 
@@ -371,7 +383,9 @@ The `_sgp_tplmode` (template mode, default to 0) is a bitwise flags integer para
 - bit 3 (`& 8`) : Always do response template no matter of target url path suffix or response content type.
 - bit 3 (`& 16`) : Keep the content-type of original response unchanged.
 
-Template example:
+#### Template examples
+
+Basic example:
 
 ```
 {{- set_status 404 -}}
@@ -404,6 +418,29 @@ Ctx.body = output();
 /*
 {{ set_body .Ctx.body }}
 */
+```
+
+#### JavaScript template
+
+If `_sgp_jstplpath` parameter is set and current url path ends with any `_sgp_jstplpath` value (e.g. `.tpl.js`), the whole template is intepreted as JavaScript.
+
+Example JavaScript template:
+
+```js
+function main() {
+  let res = fetch("https://ipinfo.io/json"); // It's different from ECMA fetch!
+  let res2 = exec("curl --version");
+  return `---
+Http
+Status: ${res.Status}
+Body: ${res.Body}
+
+Curl
+Output: ${res2.Out}
+---`;
+}
+
+main();
 ```
 
 ### Admin UI

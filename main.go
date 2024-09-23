@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/google/btree"
+
 	"github.com/sagan/simplegoproxy/admin"
 	"github.com/sagan/simplegoproxy/auth"
 	"github.com/sagan/simplegoproxy/constants"
@@ -113,6 +114,8 @@ func main() {
 	}
 	if flags.Adminpath == "" {
 		flags.Adminpath = flags.Rootpath + "admin/"
+	} else if flags.Adminpath == constants.NONE {
+		flags.Adminpath = ""
 	} else {
 		flags.Adminpath, _ = normalizeUrlPath(flags.Adminpath)
 	}
@@ -142,7 +145,9 @@ func main() {
 		flags.EnableFile, flags.EnableUnix, flags.EnableRclone, flags.EnableCurl, flags.EnableExec)
 	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(constants.TextualMediatypes, ", "))
 	fmt.Printf("Blacklist keytypes: %v\n", flags.KeytypeBlacklist)
-	fmt.Printf("Admin Web UI at %q with user/pass: %s:***\n", flags.Adminpath, flags.User)
+	if flags.Adminpath != "" {
+		fmt.Printf("Admin Web UI at %q with user/pass: %s:***\n", flags.Adminpath, flags.User)
+	}
 	if len(flags.OpenScopes) > 0 {
 		fmt.Printf("Open scopes: %v\n", flags.OpenScopes)
 	}
@@ -165,12 +170,15 @@ func main() {
 			flags.EnableExec, flags.RcloneBinary, flags.RcloneConfig, flags.CurlBinary, flags.Cipher, authenticator,
 			nonceTree)
 	}))
-	adminHandle := http.StripPrefix(flags.Adminpath, admin.GetHttpHandle())
+	var adminHandle http.Handler
+	if flags.Adminpath != "" {
+		adminHandle = http.StripPrefix(flags.Adminpath, admin.GetHttpHandle())
+	}
 	// Do not use ServeMux due to https://github.com/golang/go/issues/42244
 	err = http.ListenAndServe(flags.Addr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// We use fragment as a internal context variables holder. So make sure it's firstly cleared.
 		r.URL.Fragment = ""
-		if strings.HasPrefix(r.URL.Path, flags.Adminpath) {
+		if adminHandle != nil && strings.HasPrefix(r.URL.Path, flags.Adminpath) {
 			adminHandle.ServeHTTP(w, r)
 			return
 		}

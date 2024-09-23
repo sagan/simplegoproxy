@@ -36,9 +36,10 @@ import (
 	"github.com/jxskiss/base62"
 	"github.com/pelletier/go-toml/v2"
 	range_parser "github.com/quantumsheep/range-parser"
-	"github.com/sagan/simplegoproxy/constants"
 	"golang.org/x/crypto/pbkdf2"
 	"gopkg.in/yaml.v3"
+
+	"github.com/sagan/simplegoproxy/constants"
 )
 
 type NetRequest struct {

@@ -384,6 +384,12 @@ export default function Home({}) {
                 tpltype
               </option>
               <option
+                value="jstplpath"
+                title="Use JavaScript template if the url path ends with this value (suffix), e.g. '.tpl.js'"
+              >
+                jstplpath
+              </option>
+              <option
                 value="mutetype"
                 title="Mute target url original response if it has this content-type, '*' means all but html & txt"
               >

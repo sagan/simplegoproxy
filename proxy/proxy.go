@@ -53,6 +53,18 @@ const (
 )
 
 const (
+	TPLMODE_TEXT              = 1 << iota // bit 0 (1): text template
+	TPLMODE_RESBODY                       // bit 1 (2): use response body as template
+	TPLMODE_NOBODY                        // bit 2 (4): do not read original response body as context var
+	TPLMODE_FORCE                         // bit 3 (8): always do response body template no matter of url path of original response body type
+	TPLMODE_KEEP_CONTENT_TYPE             // bit 4 (16): rendered output keep original response content-type unchanged
+)
+
+const (
+	AUTHMODE_DIGEST = 1 << iota // bit 0 (1): Use digest auth (instead of basic auth)
+)
+
+const (
 	HEADER_PREFIX          = "header_"
 	RESPONSE_HEADER_PREFIX = "resheader_"
 	SUB_PREFIX             = "sub_"
@@ -99,6 +111,7 @@ const (
 	TPLMODE_STRING         = "tplmode"
 	TPLPATH_STRING         = "tplpath"
 	TPLTYPE_STRING         = "tpltype"
+	JSTPLPATH_STRING       = "jstplpath"
 	INDEXFILE_STRING       = "indexfile"
 	DEFAULTEXT_STRING      = "defaultext"
 	MD2HTML_STRING         = "md2html"
@@ -371,11 +384,6 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	proxy := ""
 	impersonate := ""
 	timeout := int64(0)
-	// bit 0 (1): text template;
-	// bit 1 (2): use response body as template;
-	// bit 2 (4): do not read original response body as context var;
-	// bit 3 (8): always do response body template no matter of url path of original response body type;
-	// bit 4 (16): rendered output keep original response content-type unchanged
 	var tplmode = 0
 	encmode := 0
 	authmode := 0
@@ -406,8 +414,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var scopes []string
 	var referers []string
 	var origines []string
-	var tplpathes []string // suffixes, if url ends with any suffix, do template. e.g. ".sgp.txt"
-	var subpathes []string // suffixes, if url ends with any suffix, do substitutions.
+	var tplpathes []string   // suffixes, if url ends with any suffix, do template. e.g. ".sgp.txt"
+	var subpathes []string   // suffixes, if url ends with any suffix, do substitutions.
+	var jstplpathes []string // suffixes, if url ends with any suffix, use js tpl.
 	// Mediatypes, if response has any of content type, do template. e.g. "txt" or "text/plain".
 	// Could be a ["*"] single element slice to allow all.
 	var tpltypes []string
@@ -461,6 +470,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			subpathes = parseArrayParameters(sgpflag, values, false, nil)
 		case TPLTYPE_STRING:
 			tpltypes = parseArrayParameters(sgpflag, values, false, normalizeTypeParameter)
+		case JSTPLPATH_STRING:
+			jstplpathes = parseArrayParameters(sgpflag, values, false, nil)
 		case MUTESTATUS_STRING:
 			mutestatus = parseArrayParameters(sgpflag, values, false, nil)
 		case MUTEPATH_STRING:
@@ -813,7 +824,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		if username == "" {
 			return nil, fmt.Errorf("invalid auth, username must not be empty")
 		}
-		basic := authmode&1 == 0
+		basic := authmode&AUTHMODE_DIGEST == 0
 		if errres, err := authenticator.CheckAuth(srcReq, username, password, basic); err != nil {
 			if doLog {
 				log.Printf("Auth failed: %v", err)
@@ -1036,17 +1047,23 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var jsvm *goja.Runtime
 	var tplBody io.ReadCloser
 	var resBodyTemplate constants.Template
-	if templateContents != "" || tplmode&2 != 0 {
+	if templateContents != "" || tplmode&TPLMODE_RESBODY != 0 {
+		matchtplpath := len(tplpathes) == 0 || tplpathes[0] == "*" ||
+			slices.ContainsFunc(tplpathes, func(suffix string) bool {
+				return strings.HasSuffix(effectiveUrlPath, suffix)
+			})
+		matchjstplpath := len(jstplpathes) > 0 && (jstplpathes[0] == "*" ||
+			slices.ContainsFunc(jstplpathes, func(suffix string) bool {
+				return strings.HasSuffix(effectiveUrlPath, suffix)
+			}))
 		dotpl := func() bool {
-			if tplmode&2 != 0 && res.Body == nil {
+			if tplmode&TPLMODE_RESBODY != 0 && res.Body == nil {
 				return false
 			}
-			if tplmode&8 != 0 {
+			if tplmode&TPLMODE_FORCE != 0 {
 				return true
 			}
-			if len(tplpathes) > 0 && tplpathes[0] != "*" && !slices.ContainsFunc(tplpathes, func(suffix string) bool {
-				return strings.HasSuffix(effectiveUrlPath, suffix)
-			}) {
+			if !matchtplpath && !matchjstplpath {
 				return false
 			}
 			if len(tpltypes) > 0 {
@@ -1060,13 +1077,14 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}()
 		if dotpl {
 			tplHeader = http.Header{}
-			jsvm = goja.New()
-			new(require.Registry).Enable(jsvm)
-			console.Enable(jsvm) // depends on require
+			if isSigned || inalias {
+				jsvm = goja.New()
+				new(require.Registry).Enable(jsvm)
+				console.Enable(jsvm) // depends on require
+			}
 			getTemplate := func(contents string, usehtml bool) (tplobj constants.Template, err error) {
 				// dummy side effect template funcs to update request-scope state
 				funcs := template.FuncMap{
-
 					"set_status": func(input any) string {
 						tplStatus, _ = strconv.Atoi(tpl.Any2string(input))
 						return ""
@@ -1114,6 +1132,15 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 					},
 				}
 				if isSigned || inalias {
+					for name, value := range funcs {
+						jsvm.Set(name, value)
+					}
+					for name, value := range tpl.JsFuncs {
+						jsvm.Set(name, value)
+					}
+					if matchjstplpath {
+						return &tpl.JsTpl{Vm: jsvm, Template: contents}, nil
+					}
 					funcs["eval"] = func(input any) any {
 						v, e := tpl.Eval(jsvm, input)
 						if e != nil && doLog {
@@ -1137,8 +1164,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				}
 				return tplobj, err
 			}
-			usehtml := responseMediaType == constants.MEDIATYPE_HTML && tplmode&1 == 0
-			if tplmode&2 == 0 {
+			usehtml := responseMediaType == constants.MEDIATYPE_HTML && tplmode&TPLMODE_TEXT == 0
+			if tplmode&TPLMODE_RESBODY == 0 {
 				if resBodyTemplate, err = getTemplate(templateContents, usehtml); err != nil {
 					return nil, fmt.Errorf("invalid template: %w", err)
 				}
@@ -1180,8 +1207,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			responseBodyType = originalResponseMediaType
 		}
 		var data any
-		if tplmode&2 == 0 {
-			if tplmode&4 == 0 {
+		if tplmode&TPLMODE_RESBODY == 0 {
+			if tplmode&TPLMODE_NOBODY == 0 {
 				var body []byte
 				if res.Body != nil {
 					body, err = io.ReadAll(res.Body)
@@ -1224,7 +1251,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				res.StatusCode = http.StatusOK
 			}
 			deleteContentHeaders(res.Header)
-			if responseContentType == "" && tplmode&16 == 0 {
+			if responseContentType == "" && tplmode&TPLMODE_KEEP_CONTENT_TYPE == 0 {
 				res.Header.Set("Content-Type", constants.MIME_TXT)
 			}
 			if tplStatus > 0 {
