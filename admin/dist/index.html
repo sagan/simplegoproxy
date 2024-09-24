@@ -24,7 +24,8 @@
         window.__ROOTURL__ = "http://localhost:8380/";
         window.__APIURL__ = "http://" + location.hostname + ":8380/admin/api";
       }
-      document.title += " " + window.__VERSION__ + " - " + window.__SITENAME__;
+      document.title =
+        window.__SITENAME__ + " - " + document.title + " " + window.__VERSION__;
     </script>
     <script type="module" crossorigin src="./assets/index.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index.css">

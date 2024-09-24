@@ -38,7 +38,7 @@ upx:
     # Whether to try LZMA (slower).
     lzma: true
     # Whether to try all methods and filters (slow).
-    brute: false
+    brute: true
 checksum:
   name_template: "checksums.txt"
 snapshot:

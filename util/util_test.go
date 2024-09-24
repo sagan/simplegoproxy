@@ -4,6 +4,8 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"testing"
+
+	"github.com/sagan/simplegoproxy/constants"
 )
 
 func TestMatchUrlPattern(t *testing.T) {
@@ -104,14 +106,14 @@ func TestMatchUrlPattern(t *testing.T) {
 
 func TestEncryptDecrypt(t *testing.T) {
 	pass := "abc"
-	encryptCipher, err := GetCipher(pass, "")
+	encryptCipher, err := GetCipher(pass, "", constants.DEFAULT_PASSITER)
 	if err != nil {
 		t.Fatalf("Failed to get encrypt cipher: %v", err)
 	}
 	str := "In God We Trust"
 	cipherstring := EncryptToString(encryptCipher, []byte(str))
 
-	decryptCipher, err := GetCipher(pass, "")
+	decryptCipher, err := GetCipher(pass, "", constants.DEFAULT_PASSITER)
 	if err != nil {
 		t.Fatalf("Failed to get decrypt cipher: %v", err)
 	}
@@ -147,14 +149,14 @@ func TestPublickeyEncryptDecrypt(t *testing.T) {
 	alicepub := alicekey.PublicKey()
 	bobpub := bobkey.PublicKey()
 
-	bobCipher, err := GetPublickeyCipher(pass, salt, bobkey, alicepub)
+	bobCipher, err := GetPublickeyCipher(pass, salt, constants.DEFAULT_PASSITER, bobkey, alicepub)
 	if err != nil {
 		t.Fatalf("Failed to get encrypt cipher: %v", err)
 	}
 	plainstring := "In God We Trust"
 	cipherstring := EncryptToString(bobCipher, []byte(plainstring))
 
-	aliceCipher, err := GetPublickeyCipher(pass, salt, alicekey, bobpub)
+	aliceCipher, err := GetPublickeyCipher(pass, salt, constants.DEFAULT_PASSITER, alicekey, bobpub)
 	if err != nil {
 		t.Fatalf("Failed to get decrypt cipher: %v", err)
 	}

@@ -407,6 +407,12 @@ export default function Home({}) {
               >
                 mutestatus
               </option>
+              <option
+                title="Response encryption password based key derivation iteration count, default = 1"
+                value="passiter"
+              >
+                passiter
+              </option>
               <option title="proxy=socks5://1.2.3.4:1080" value="proxy">
                 proxy
               </option>
@@ -710,14 +716,10 @@ export default function Home({}) {
                   <option value="5">Full(4)+Binary(1)</option>
                   <option value="12">Full(4)+TextBody(8)</option>
                   <option value="20">Full(4)+BinBody(16)</option>
-                  <option value="13">Full(4)+TextBody(8)+Binary(1)</option>
-                  <option value="21">Full(4)+BinBody(16)+Binary(1)</option>
-                  <option value="45">
-                    Full(4)+TextBody(8)+Binary(1)+Sign(32)
-                  </option>
-                  <option value="53">
-                    Full(4)+BinBody(16)+Binary(1)+Sign(32)
-                  </option>
+                  <option value="13">F(4)+TB(8)+B(1)</option>
+                  <option value="21">F(4)+BB(16)+B(1)</option>
+                  <option value="45">F(4)+TB(8)+B(1)+S(32)</option>
+                  <option value="53">F(4)+BB(16)+B(1)+S(32)</option>
                   <option value="64" title="Only do localsign, no encryption">
                     SignOnly (64)
                   </option>
@@ -759,12 +761,12 @@ export default function Home({}) {
                   </option>
                   <option value="3">Text(1)+BodyType(2)</option>
                   <option value="5">Text(1)+NoOriginalBody(4)</option>
-                  <option value="11">Text(1)+BT(2)+A(8)</option>
-                  <option value="13">Text(1)+NOB(4)+A(8)</option>
-                  <option value="19">Text(1)+BT(2)+KT(16)</option>
-                  <option value="21">Text(1)+NOB(4)+KT(16)</option>
-                  <option value="27">Text(1)+BT(2)+A(8)+KT(16)</option>
-                  <option value="29">Text(1)+NOB(4)+A(8)+KT(16)</option>
+                  <option value="11">T(1)+BT(2)+A(8)</option>
+                  <option value="13">T(1)+NOB(4)+A(8)</option>
+                  <option value="19">T(1)+BT(2)+KT(16)</option>
+                  <option value="21">T(1)+NOB(4)+KT(16)</option>
+                  <option value="27">T(1)+BT(2)+A(8)+KT(16)</option>
+                  <option value="29">T(1)+NOB(4)+A(8)+KT(16)</option>
                 </select>
               </label>
             </p>

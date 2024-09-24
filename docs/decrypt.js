@@ -113,6 +113,7 @@ function toHexString(arr) {
  * @param localsign Bool. If true, do local signing of suburl using password. It will prevent replay attacks.
  *  This flag should be set when and only when the unecrypted form or url has encmode&(32 || 64) != 0.
  * @param prefix String. The modification parameter prefix. Default is "_sgp_".
+ * @param passiter Integer. The password based key derivation iteration count. Default is 1.
  * @returns Promise of string. The decrypted response plaintext.
  */
 async function fetchAndDecrypt({
@@ -123,6 +124,7 @@ async function fetchAndDecrypt({
   publickey = false,
   nodecrypt = false,
   prefix = "_sgp_",
+  passiter = 1,
 } = {}) {
   if (url == "" || password == "") {
     throw new Error("url must be set");
@@ -207,7 +209,7 @@ async function fetchAndDecrypt({
     {
       name: "PBKDF2",
       salt: new TextEncoder().encode(salt),
-      iterations: 1000000,
+      iterations: passiter,
       hash: "SHA-256",
     },
     keymaterial,

@@ -59,7 +59,7 @@ func main() {
 	flags.Rootpath, _ = normalizeUrlPath(flags.Rootpath)
 	flags.KeytypeBlacklist = util.SplitCsv(flags.KeytypeBlacklistStr)
 	if flags.Key != "" {
-		if flags.Cipher, err = util.GetCipher(flags.Key, ""); err != nil {
+		if flags.Cipher, err = util.GetCipher(flags.Key, "", constants.KEY_PASSITER); err != nil {
 			log.Fatalf("Failed to create key cipher: %v", err)
 		}
 	}

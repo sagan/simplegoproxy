@@ -120,6 +120,7 @@ const (
 	SALT_STRING            = "salt"
 	NONCE_STRING           = "nonce"
 	PUBLICKEY_STRING       = "publickey"
+	PASSITER_STRING        = "passiter"
 	FLAG_STRING            = "flag"
 	ARG_SRING              = "arg"
 	ARGS_SRING             = "args"
@@ -384,9 +385,10 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	proxy := ""
 	impersonate := ""
 	timeout := int64(0)
-	var tplmode = 0
+	tplmode := 0
 	encmode := 0
 	authmode := 0
+	passiter := 0
 	cookie := ""
 	user := ""
 	authuser := ""
@@ -444,6 +446,11 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		switch key {
 		case FLAG_STRING, EID_STRING, EPATH_STRING, ARG_SRING, ARGS_SRING:
 			// do nothing
+		case PASSITER_STRING:
+			passiter, err = strconv.Atoi(value)
+			if err != nil || passiter < 0 {
+				return nil, fmt.Errorf("invalid passiter: %w", err)
+			}
 		case TPLMODE_STRING:
 			tplmode, err = strconv.Atoi(value)
 			if err != nil || tplmode < 0 {
@@ -654,6 +661,9 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	}
 	if len(origines) > 0 && origines[0] != "*" && !util.MatchUrlPatterns(origines, srcReq.Header.Get("Origin"), true) {
 		return nil, fmt.Errorf("invalid origin '%s', allowed origines: %v", srcReq.Header.Get("Origin"), origines)
+	}
+	if passiter == 0 {
+		passiter = constants.DEFAULT_PASSITER
 	}
 
 	// In the beginning of this func, it already checks if sign is required but not signed.
@@ -1305,7 +1315,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 				return nil, fmt.Errorf("failed to generate ecdh private key: %w", err)
 			}
 		}
-		cipher, err = util.GetPublickeyCipher(respass, salt, localPrivatekey, remotePublickey)
+		cipher, err = util.GetPublickeyCipher(respass, salt, passiter, localPrivatekey, remotePublickey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get resbody cipher: %w", err)
 		}

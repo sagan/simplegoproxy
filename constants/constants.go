@@ -37,6 +37,15 @@ const NONE = "none"
 
 const SGP_ENV_PREFIX = "SGP_"
 
+// Default pbkdf2 (password based key derivation) iteration count for response encryption password
+const DEFAULT_PASSITER = 1
+
+// The key flag (primary password of Simpleproxy server) pbkdf2 iteration count
+const KEY_PASSITER = 1000000
+
+// Pbkdf2 iteration count for encryption functions in template
+const TPL_PASSITER = 1
+
 const DEFAULT_MIME = "application/octet-stream"
 const MIME_TXT = "text/plain; charset=utf-8"
 const MIME_HTML = "text/html; charset=utf-8"

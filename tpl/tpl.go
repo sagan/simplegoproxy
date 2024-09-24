@@ -15,6 +15,7 @@ import (
 	"github.com/dop251/goja"
 	"github.com/google/shlex"
 
+	"github.com/sagan/simplegoproxy/constants"
 	"github.com/sagan/simplegoproxy/util"
 )
 
@@ -201,7 +202,7 @@ func encrypt(password, salt, data any) string {
 // Encrypt data to binary string
 func encrypt_binary(password, salt, data any) []byte {
 	// if password
-	cipher, err := util.GetCipher(Any2string(password), Any2string(salt))
+	cipher, err := util.GetCipher(Any2string(password), Any2string(salt), constants.TPL_PASSITER)
 	if err != nil {
 		return nil
 	}
@@ -211,7 +212,7 @@ func encrypt_binary(password, salt, data any) []byte {
 // Decrypt base64 data string
 func decrypt(password, salt, data any) string {
 	// if password
-	cipher, err := util.GetCipher(Any2string(password), Any2string(salt))
+	cipher, err := util.GetCipher(Any2string(password), Any2string(salt), constants.TPL_PASSITER)
 	if err != nil {
 		return ""
 	}
@@ -224,7 +225,7 @@ func decrypt(password, salt, data any) string {
 
 // Decrypt binary data
 func decrypt_binary(password, salt, data any) string {
-	cipher, err := util.GetCipher(Any2string(password), Any2string(salt))
+	cipher, err := util.GetCipher(Any2string(password), Any2string(salt), constants.TPL_PASSITER)
 	if err != nil {
 		return ""
 	}
