@@ -115,6 +115,7 @@ const (
 	INDEXFILE_STRING       = "indexfile"
 	DEFAULTEXT_STRING      = "defaultext"
 	MD2HTML_STRING         = "md2html"
+	MDPATH_STRING          = "mdpath"
 	DEBUG_STRING           = "debug"
 	EPATH_STRING           = "epath" // allow subpath in encrypted url
 	SALT_STRING            = "salt"
@@ -427,6 +428,7 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 	var mutetypes []string  // mute original http response of these content types
 	// Do subs for these content-types. could be a ["*"] single element slice to allow all.
 	var subtypes []string
+	var mdpathes []string
 	// bitwise flags. bit 0: don't parse each value of array values as csv
 	var sgpflag = 0
 	if f := queryParams.Get(FLAG_STRING); f != "" {
@@ -492,6 +494,8 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 			})
 		case SUBTYPE_STRING:
 			subtypes = parseArrayParameters(sgpflag, values, false, normalizeTypeParameter)
+		case MDPATH_STRING:
+			mdpathes = parseArrayParameters(sgpflag, values, false, nil)
 		case SALT_STRING:
 			salt = value
 		case LOCALSIGN_STRING:
@@ -1281,8 +1285,17 @@ func FetchUrl(urlObj *url.URL, srcReq *http.Request, queryParams url.Values, pre
 		}
 	}
 
-	if md2html && res.Body != nil &&
-		util.MediaType(util.ContentType(res.Header.Get("Content-Type"))) == constants.MEDIATYPE_MD {
+	domd := false
+	if res.Body != nil && (md2html || len(mdpathes) > 0) {
+		if len(mdpathes) > 0 {
+			domd = mdpathes[0] == "*" || slices.ContainsFunc(mdpathes, func(suffix string) bool {
+				return strings.HasSuffix(effectiveUrlPath, suffix)
+			})
+		} else {
+			domd = util.MediaType(res.Header.Get("Content-Type")) == constants.MEDIATYPE_MD
+		}
+	}
+	if domd {
 		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		if err != nil {

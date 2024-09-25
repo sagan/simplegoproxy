@@ -245,6 +245,7 @@ The "Array Value" type parameters can be set multiple times; alternatively, mult
   - `!xxx` : All content types except this specific type. E.g. `!html`.
 - `_sgp_indexfile=<value>` : If this parameter is set and the current target url ends with `/`, Simplegoproxy will append this parameter to the end of target url before fetching it. E.g. `index.html`.
 - `_sgp_md2html` : (Value ignored) Render markdown to html. If this parameter is set and the response has a content type of `text/markdown`, Simplegoproxy will convert the response body from markdown to html and set `Content-Type: text/html` response header.
+- `_sgp_mdpath` : Array Value. If the target url path ends with this suffix, do markdown-html conversion.
 - `_sgp_salt=<value>` : The response encryption key salt. See below "Response encryption" section.
 - `_sgp_publickey=<value>` : The response encryption ECDH client pulic key (hex string). See below "Response encryption" section.
 - `_sgp_referer=<value>` : Array Value. Set the allowed referer of request to the entrypoint url. See below "Referer restrictions" section.

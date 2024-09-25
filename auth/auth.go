@@ -192,7 +192,13 @@ func DigestAuthParams(authorization string) map[string]string {
 func (a *Auth) CheckAuth(r *http.Request, username, password string, basic bool) (errres *http.Response, err error) {
 	if basic {
 		user, pass, ok := r.BasicAuth()
-		if !ok || username != user || password != pass {
+		if !ok {
+			return a.requireAuth(basic), errUnauthorized
+		}
+		usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte(user))
+		passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(pass))
+		userAndPassOk := subtle.ConstantTimeSelect(usernameMatch, passwordMatch, 0) == 0
+		if userAndPassOk {
 			return a.requireAuth(basic), errUnauthorized
 		}
 		return nil, nil

@@ -418,6 +418,12 @@ export default function Home({}) {
               </option>
               <option value="scope=">scope</option>
               <option value="scope=*://*/*">scope=*</option>
+              <option
+                value="mdpath"
+                title="Do markdown-html conversion if the url path ends with this value (suffix), e.g. '.md'"
+              >
+                mdpath
+              </option>
               <option title="Render markdown to html" value="md2html=1">
                 md2html=1
               </option>
