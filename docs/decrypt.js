@@ -1,6 +1,6 @@
 const { parseArgs } = require("util");
 
-// node decrypt.js --url "http://localhost:8380/xxx" --password abc --localsign --publickey
+// node decrypt.js --url "http://localhost:8380/xxx" --password abc --localsign --publickey --suburl ""
 
 // Fetch a Simplegoproxy entrypoint url with encrypted response and decrypt it.
 // Assume Simplegoproxy server is using default "_sgp_" prefix.
@@ -75,9 +75,7 @@ function base64ToBytes(base64) {
 }
 
 function bytesToBase64(bytes) {
-  const binString = Array.from(bytes, (byte) =>
-    String.fromCodePoint(byte)
-  ).join("");
+  const binString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join("");
   return btoa(binString);
 }
 
@@ -85,9 +83,7 @@ function bytesToBase64(bytes) {
  * hex string => Uint8Array
  */
 function fromHexString(hexString) {
-  return new Uint8Array(
-    hexString.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
-  );
+  return new Uint8Array(hexString.match(/.{1,2}/g).map((byte) => parseInt(byte, 16)));
 }
 
 /**
@@ -182,11 +178,7 @@ async function fetchAndDecrypt({
       false,
       ["sign", "verify"]
     );
-    let localsign = await crypto.subtle.sign(
-      "HMAC",
-      localsignkey,
-      new TextEncoder().encode(signurl)
-    );
+    let localsign = await crypto.subtle.sign("HMAC", localsignkey, new TextEncoder().encode(signurl));
     params.set(prefix + "localsign", toHexString(localsign));
   }
 
@@ -258,22 +250,34 @@ async function fetchAndDecrypt({
       true,
       ["encrypt", "decrypt"]
     );
+    // secret cann't declare deriveKey, so export it once first.
+    let secretData = new Uint8Array(await crypto.subtle.exportKey("raw", secret));
+    let secretmaterial = await crypto.subtle.importKey("raw", secretData, { name: "PBKDF2" }, false, [
+      "deriveBits",
+      "deriveKey",
+    ]);
+
+    // use PBKDF2 to derive secret key from ECDH share secret
+    let secretKey = await crypto.subtle.deriveKey(
+      {
+        name: "PBKDF2",
+        salt: new Uint8Array(),
+        iterations: 1,
+        hash: "SHA-256",
+      },
+      secretmaterial,
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["encrypt", "decrypt"]
+    );
 
     // xor key with ECDH secret to get the effective key.
     let keyData = new Uint8Array(await crypto.subtle.exportKey("raw", key));
-    let secretData = new Uint8Array(
-      await crypto.subtle.exportKey("raw", secret)
-    );
+    let secretKeyData = new Uint8Array(await crypto.subtle.exportKey("raw", secretKey));
     for (let i = 0; i < keyData.length; i++) {
-      keyData[i] ^= secretData[i];
+      keyData[i] ^= secretKeyData[i];
     }
-    key = await crypto.subtle.importKey(
-      "raw",
-      keyData,
-      { name: "AES-GCM" },
-      false,
-      ["encrypt", "decrypt"]
-    );
+    key = await crypto.subtle.importKey("raw", keyData, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
   }
 
   const alg = { name: "AES-GCM", iv: cipherdata.slice(0, 12) };

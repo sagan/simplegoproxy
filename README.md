@@ -693,16 +693,17 @@ Additional encryption parameters:
 Besides above "normal" encryption mode, if the request to the server contains `_sgp_publickey` paramter, response encryption will use a "public key" encryption mode that derives AES-256-GCM key from not only the password & salt, but also the [ECDH](https://en.wikipedia.org/wiki/Elliptic-curve_Diffie%E2%80%93Hellman) ([Curve25519](https://en.wikipedia.org/wiki/Curve25519) / X25519) key exchange of a client provided public key and a server generated request scope ephermal private key. This mode is more complicated but provides [forward secrecy](https://en.wikipedia.org/wiki/Forward_secrecy). To use this mode, follow the below procedures:
 
 1. Client generates a random X25519 private key & public key.
-2. Client sends the request to Simplegoproxy server via encrypted form entrypoint url, put it's public key (hex string) in `_sgp_publickey` parameter of the request.
-3. Server generates it's own private key & public key, derive the AES-256-GCM key from password and ECDH. The generated keys is ephemeral and will be destroyed after current request is handled.
-4. Server puts it's own public key in `X-Encryption-Publickey` header (base64 string) and sends the encrypted data in http body.
-5. Client derives the AES encryption key from password and ECDH, uses it to decrypt the data.
+2. Client sends the request to Simplegoproxy server via encrypted form entrypoint url, puts it's public key (hex string) in `_sgp_publickey` parameter of the request.
+3. Server generates it's own X25519 private key & public key, derives the AES-256 key (32 bytes) from password and ECDH. The generated keys (private key & public key & AES-256 key) is ephemeral and will be destroyed after current request is handled.
+4. Server puts it's own public key in `X-Encryption-Publickey` header (base64 string) and sends the AES-256-GCM encrypted data in http body.
+5. Client derives the AES-256 key from password and ECDH, uses it to decrypt the data.
 
-To derive the AES-256-GCM key (32 bytes):
+To derive the AES-256 key:
 
-1. Generate the `key` from password & salt using PBKDF2 (the same as "normal" response encryption mode)
-2. Do X25519 ECDH using self (client) private key and remote (server) public key to derive the `key1` (same 32 bytes length).
-3. Apply `key = key ^ key1` (XOR) to derive the final effective AES key.
+1. Generate the 32 bytes `key` from password & salt(`_sgp_salt`) & iter(`_sgp_passiter`) using PBKDF2 - SHA-256 (the same as "normal" response encryption mode).
+2. Do X25519 ECDH using self (client) private key and remote (server) public key to derive the share `secret` (also 32 bytes length).
+3. Derive the 32 bytes `key1` from `secret` using PBKDF2 - SHA-256 with salt = empty, iter = 1.
+4. Apply `key = key ^ key1` (XOR) to derive the final effective symmetric AES-256 key.
 
 #### Local signing
 

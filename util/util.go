@@ -1118,12 +1118,13 @@ func GetPublickeyCipher(passphrase string, salt string, iter int,
 		if err != nil {
 			return nil, fmt.Errorf("failed to derive ecdh shared secret: %w", err)
 		}
+		secretKey := pbkdf2.Key(secret, nil, 1, 32, sha256.New)
 		if key != nil {
 			for i := range key {
-				key[i] ^= secret[i]
+				key[i] ^= secretKey[i]
 			}
 		} else {
-			key = secret
+			key = secretKey
 		}
 	}
 	block, err := aes.NewCipher(key)
