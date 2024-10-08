@@ -191,18 +191,14 @@ func main() {
 					http.NotFound(w, r)
 					return
 				}
-				if rp == "" {
-					rp = url.PathEscape(p)
-				}
 				r2 := new(http.Request)
 				*r2 = *r
 				r2.URL = new(url.URL)
 				*r2.URL = *r.URL
 				r2.URL.Path = alias[1] + p
-				r2.URL.RawPath = alias[2] + rp
 				var reqparams = url.Values{
 					constants.REQ_INALIAS: []string{"1"},
-					constants.REQ_RPATH:   []string{rp},
+					constants.REQ_RPATH:   []string{p},
 				}
 				r2.URL.Fragment = reqparams.Encode()
 				proxyHandle.ServeHTTP(w, r2)

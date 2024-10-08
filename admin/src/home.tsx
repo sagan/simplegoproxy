@@ -48,10 +48,7 @@ export default function Home({}) {
     getValues,
     formState: { errors },
   } = useForm<InputForm>();
-  const [urls, setUrls, clearUrls] = useLocalStorage<Generate[]>(
-    window.__ROOTPATH__ + "|urls",
-    []
-  );
+  const [urls, setUrls, clearUrls] = useLocalStorage<Generate[]>(window.__ROOTPATH__ + "|urls", []);
   let [searchParams, setSearchParams] = useSearchParams();
   const [copiedIndex, setCopiedIndex] = useState(-1);
   const [filter, setFilter] = useState("");
@@ -141,9 +138,7 @@ export default function Home({}) {
               <option value="34300800">13M valid</option>
             </select>
           </label>
-          <label
-            title={`Encryption url id${errors.eid ? ": invalid input" : ""}`}
-          >
+          <label title={`Encryption url id${errors.eid ? ": invalid input" : ""}`}>
             <span>Eid:&nbsp;</span>
             <input
               className={`${errors.eid ? "error" : ""} w-16`}
@@ -157,19 +152,13 @@ export default function Home({}) {
               checked={encrypt}
               type="checkbox"
               onChange={(e) => {
-                setSearchParams(
-                  serializeInputForm(getValues(), e.target.checked)
-                );
+                setSearchParams(serializeInputForm(getValues(), e.target.checked));
               }}
             />
             <span>🔒&nbsp;Encrypt</span>
           </label>
           <label title="Allow encrypted url to have plaintext children path and query variables">
-            <input
-              defaultChecked={!!searchParams.get("epath")}
-              type="checkbox"
-              {...register("epath")}
-            />
+            <input defaultChecked={!!searchParams.get("epath")} type="checkbox" {...register("epath")} />
             &nbsp;Epath
           </label>
           <button type="submit">Generate</button>
@@ -216,43 +205,23 @@ export default function Home({}) {
         </p>
         <p className="flex flex-wrap">
           <label title="Add the CORS-allow-all headers to original response">
-            <input
-              defaultChecked={!!searchParams.get("cors")}
-              type="checkbox"
-              {...register("cors")}
-            />
+            <input defaultChecked={!!searchParams.get("cors")} type="checkbox" {...register("cors")} />
             &nbsp;Cors
           </label>
           <label title="Remove the Content Security Policy (CSP) headers from original response">
-            <input
-              defaultChecked={!!searchParams.get("nocsp")}
-              type="checkbox"
-              {...register("nocsp")}
-            />
+            <input defaultChecked={!!searchParams.get("nocsp")} type="checkbox" {...register("nocsp")} />
             &nbsp;No csp
           </label>
           <label title="Forward 'User-Agent' request header">
-            <input
-              defaultChecked={!!searchParams.get("fdua")}
-              type="checkbox"
-              {...register("fdua")}
-            />
+            <input defaultChecked={!!searchParams.get("fdua")} type="checkbox" {...register("fdua")} />
             &nbsp;Fd UA
           </label>
           <label title="Forward 'Authorization' request header">
-            <input
-              defaultChecked={!!searchParams.get("fdauth")}
-              type="checkbox"
-              {...register("fdauth")}
-            />
+            <input defaultChecked={!!searchParams.get("fdauth")} type="checkbox" {...register("fdauth")} />
             &nbsp;Fd Auth
           </label>
           <label title="Debug mode">
-            <input
-              defaultChecked={!!searchParams.get("debug")}
-              type="checkbox"
-              {...register("debug")}
-            />
+            <input defaultChecked={!!searchParams.get("debug")} type="checkbox" {...register("debug")} />
             &nbsp;Debug
           </label>
           <label>
@@ -266,26 +235,14 @@ export default function Home({}) {
           </label>
           <label>
             Keytype:&nbsp;
-            <input
-              className="w-16"
-              defaultValue={searchParams.get("keytype") || ""}
-              {...register("keytype")}
-            />
+            <input className="w-16" defaultValue={searchParams.get("keytype") || ""} {...register("keytype")} />
           </label>
           <label title="Set request" className={activeReq ? "active" : ""}>
-            <input
-              checked={showreq}
-              type="checkbox"
-              onChange={() => setShowreq(!showreq)}
-            />
+            <input checked={showreq} type="checkbox" onChange={() => setShowreq(!showreq)} />
             &nbsp;Req
           </label>
           <label title="Set response" className={activeRes ? "active" : ""}>
-            <input
-              checked={showres}
-              type="checkbox"
-              onChange={() => setShowres(!showres)}
-            />
+            <input checked={showres} type="checkbox" onChange={() => setShowres(!showres)} />
             &nbsp;Res
           </label>
           <label title="Add a parameter to addon">
@@ -347,22 +304,13 @@ export default function Home({}) {
               <option title="origin=http://*.example.com/*" value="origin">
                 origin
               </option>
-              <option
-                title="validbefore=2006-01-02T15:04:05Z"
-                value="validbefore"
-              >
+              <option title="validbefore=2006-01-02T15:04:05Z" value="validbefore">
                 validbefore
               </option>
-              <option
-                title="validafter=2006-01-02T15:04:05Z"
-                value="validafter"
-              >
+              <option title="validafter=2006-01-02T15:04:05Z" value="validafter">
                 validafter
               </option>
-              <option
-                title="Use a index file for directory, e.g. 'index.html'"
-                value="indexfile"
-              >
+              <option title="Use a index file for directory, e.g. 'index.html'" value="indexfile">
                 indexfile
               </option>
               <option
@@ -395,10 +343,7 @@ export default function Home({}) {
               >
                 mutetype
               </option>
-              <option
-                value="mutepath"
-                title="Do not fetch target url if it's path ends with this suffix"
-              >
+              <option value="mutepath" title="Do not fetch target url if it's path ends with this suffix">
                 mutepath
               </option>
               <option
@@ -436,19 +381,13 @@ export default function Home({}) {
               >
                 trimresheader=1
               </option>
-              <option
-                title="Force do string substitions on any type response"
-                value="forcesub=1"
-              >
+              <option title="Force do string substitions on any type response" value="forcesub=1">
                 forcesub=1
               </option>
               <option title="No redirect following" value="norf=1">
                 norf=1
               </option>
-              <option
-                title="Disable TLS/SSL cert verifications"
-                value="insecure=1"
-              >
+              <option title="Disable TLS/SSL cert verifications" value="insecure=1">
                 insecure=1
               </option>
             </select>
@@ -463,11 +402,7 @@ export default function Home({}) {
                     return;
                   }
                   let addon = getValues().addon;
-                  if (
-                    addon.length > 0 &&
-                    !addon.endsWith("=") &&
-                    !addon.endsWith("_")
-                  ) {
+                  if (addon.length > 0 && !addon.endsWith("=") && !addon.endsWith("_")) {
                     addon += "=";
                   }
                   addon += encodeURIComponent(value);
@@ -531,10 +466,7 @@ export default function Home({}) {
             <p className="flex flex-wrap">
               <label title="Http request method">
                 Method&nbsp;
-                <select
-                  defaultValue={searchParams.get("method")}
-                  {...register("method")}
-                >
+                <select defaultValue={searchParams.get("method")} {...register("method")}>
                   <option value="">(Default)</option>
                   <option value="GET">GET</option>
                   <option value="PUT">PUT</option>
@@ -544,44 +476,25 @@ export default function Home({}) {
               </label>
               <label title="Http request content type">
                 Type&nbsp;
-                <select
-                  defaultValue={searchParams.get("type")}
-                  {...register("type")}
-                >
+                <select defaultValue={searchParams.get("type")} {...register("type")}>
                   <option value="">(Default)</option>
-                  <option value="application/x-www-form-urlencoded">
-                    application/x-www-form-urlencoded
-                  </option>
-                  <option value="multipart/form-data">
-                    multipart/form-data
-                  </option>
+                  <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
+                  <option value="multipart/form-data">multipart/form-data</option>
                   <option value="txt">txt</option>
                   <option value="json">json</option>
                   <option value="xml">xml</option>
                 </select>
               </label>
               <label title="Forward http request method">
-                <input
-                  defaultChecked={!!searchParams.get("fdmethod")}
-                  type="checkbox"
-                  {...register("fdmethod")}
-                />
+                <input defaultChecked={!!searchParams.get("fdmethod")} type="checkbox" {...register("fdmethod")} />
                 &nbsp;Fd Method
               </label>
               <label title="Forward http request Content-Type">
-                <input
-                  defaultChecked={!!searchParams.get("fdtype")}
-                  type="checkbox"
-                  {...register("fdtype")}
-                />
+                <input defaultChecked={!!searchParams.get("fdtype")} type="checkbox" {...register("fdtype")} />
                 &nbsp;Fd Type
               </label>
               <label title="Forward http request body">
-                <input
-                  defaultChecked={!!searchParams.get("fdbody")}
-                  type="checkbox"
-                  {...register("fdbody")}
-                />
+                <input defaultChecked={!!searchParams.get("fdbody")} type="checkbox" {...register("fdbody")} />
                 &nbsp;Fd Body
               </label>
               <label title="Target url http request basic auth user">
@@ -595,10 +508,7 @@ export default function Home({}) {
               </label>
               <label title="Http request impersonate browser">
                 Impersonate:&nbsp;
-                <select
-                  defaultValue={searchParams.get("impersonate")}
-                  {...register("impersonate")}
-                >
+                <select defaultValue={searchParams.get("impersonate")} {...register("impersonate")}>
                   <option value="">(default)</option>
                   <option value="chrome120">chrome120</option>
                   <option value="firefox121">firefox121</option>
@@ -625,10 +535,7 @@ export default function Home({}) {
                   {...register("status", { valueAsNumber: true })}
                 >
                   <option value="0">(Default)</option>
-                  <option
-                    value="-1"
-                    title="Always use original target url http response status"
-                  >
+                  <option value="-1" title="Always use original target url http response status">
                     Original
                   </option>
                   <option value="200">200</option>
@@ -641,15 +548,9 @@ export default function Home({}) {
               </label>
               <label title="Http response content type">
                 Restype&nbsp;
-                <select
-                  defaultValue={searchParams.get("restype")}
-                  {...register("restype")}
-                >
+                <select defaultValue={searchParams.get("restype")} {...register("restype")}>
                   <option value="">(Default)</option>
-                  <option
-                    value="*"
-                    title="Automatically guess response content-type from current url path suffix"
-                  >
+                  <option value="*" title="Automatically guess response content-type from current url path suffix">
                     * (auto)
                   </option>
                   <option value="txt">txt</option>
@@ -696,11 +597,7 @@ export default function Home({}) {
               </label>
               <label title="Password to encrypt response">
                 <span>Respass:&nbsp;🔑</span>
-                <input
-                  className="w-16"
-                  defaultValue={searchParams.get("respass") || ""}
-                  {...register("respass")}
-                />
+                <input className="w-16" defaultValue={searchParams.get("respass") || ""} {...register("respass")} />
                 <button
                   type="button"
                   title="Generate a random encryption password"
@@ -719,13 +616,19 @@ export default function Home({}) {
                   <option value="2">Body only encryption (2)</option>
                   <option value="3">Binary(1)+BodyOnly(2)</option>
                   <option value="4">Full protection (4)</option>
-                  <option value="5">Full(4)+Binary(1)</option>
+                  <option value="5">Binary(1)+Full(4)</option>
                   <option value="12">Full(4)+TextBody(8)</option>
                   <option value="20">Full(4)+BinBody(16)</option>
-                  <option value="13">F(4)+TB(8)+B(1)</option>
-                  <option value="21">F(4)+BB(16)+B(1)</option>
+                  <option value="13">B(1)+F(4)+TB(8)</option>
+                  <option value="21">B(1)+F(4)+BB(16)</option>
                   <option value="45">F(4)+TB(8)+B(1)+S(32)</option>
                   <option value="53">F(4)+BB(16)+B(1)+S(32)</option>
+                  <option value="32" title="Require localsign">
+                    Sign (32)
+                  </option>
+                  <option value="33" title="">
+                    Binary(1)+Sign(32)
+                  </option>
                   <option value="64" title="Only do localsign, no encryption">
                     SignOnly (64)
                   </option>
@@ -738,31 +641,19 @@ export default function Home({}) {
                   {...register("tplmode", { valueAsNumber: true })}
                 >
                   <option value="0">(None)</option>
-                  <option
-                    value="1"
-                    title="Always use text template (never use html template)"
-                  >
+                  <option value="1" title="Always use text template (never use html template)">
                     Text template (1)
                   </option>
-                  <option
-                    value="2"
-                    title="Use original response body as template"
-                  >
+                  <option value="2" title="Use original response body as template">
                     BodyTpl (2)
                   </option>
-                  <option
-                    value="4"
-                    title="Do not read original response body prior renderring template"
-                  >
+                  <option value="4" title="Do not read original response body prior renderring template">
                     NoOriginalBody (4)
                   </option>
                   <option value="8" title="Always do response template">
                     AlwaysDo (8)
                   </option>
-                  <option
-                    value="16"
-                    title="Keep the content-type of original response unchanged"
-                  >
+                  <option value="16" title="Keep the content-type of original response unchanged">
                     KeepType (16)
                   </option>
                   <option value="3">Text(1)+BodyType(2)</option>
@@ -791,12 +682,7 @@ export default function Home({}) {
         <h2 className="flex">
           <span className="flex-1">
             <span>Generated Urls (Stored locally)</span>
-            <input
-              type="search"
-              placeholder="filter"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
+            <input type="search" placeholder="filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
           </span>
           <span>
             <button
@@ -832,29 +718,20 @@ export default function Home({}) {
               try {
                 let urlObj = new URL(url.url);
                 // URL.prototype.get return null for non-exists value !
-                res_encrypted = !!urlObj.searchParams.get(
-                  window.__PREFIX__ + "respass"
-                );
-                needauth = !!urlObj.searchParams.get(
-                  window.__PREFIX__ + "auth"
-                );
-                validbefore =
-                  urlObj.searchParams.get(window.__PREFIX__ + "validbefore") ||
-                  "";
+                res_encrypted = !!urlObj.searchParams.get(window.__PREFIX__ + "respass");
+                needauth = !!urlObj.searchParams.get(window.__PREFIX__ + "auth");
+                validbefore = urlObj.searchParams.get(window.__PREFIX__ + "validbefore") || "";
               } catch (e) {}
               let accessurl = url.entryurl;
               let encryptedUrl = false;
               if (
-                (url.encrypted_entryurl != "" &&
-                  (encrypt || needauth || res_encrypted)) ||
+                (url.encrypted_entryurl != "" && (encrypt || needauth || res_encrypted)) ||
                 (accessurl == "" && url.encrypted_entryurl != "")
               ) {
                 accessurl = url.encrypted_entryurl;
                 encryptedUrl = true;
               }
-              let display =
-                index == urls.length ||
-                url.url.toLowerCase().indexOf(filter_lowercase) != -1;
+              let display = index == urls.length || url.url.toLowerCase().indexOf(filter_lowercase) != -1;
               if (!display) {
                 return null;
               }
@@ -863,9 +740,7 @@ export default function Home({}) {
                   <td>{index}</td>
                   <td className="targeturl">
                     <a href={url.url}>
-                      {url.url.length > URL_LENGTH_LIMIT
-                        ? url.url.substring(0, URL_LENGTH_LIMIT) + "..."
-                        : url.url}
+                      {url.url.length > URL_LENGTH_LIMIT ? url.url.substring(0, URL_LENGTH_LIMIT) + "..." : url.url}
                     </a>
                   </td>
                   <td className="accessurl">
@@ -880,10 +755,7 @@ export default function Home({}) {
                       </span>
                     )}
                     {needauth && (
-                      <span
-                        className="icon"
-                        title="Request to the entrypoint url needs authentication"
-                      >
+                      <span className="icon" title="Request to the entrypoint url needs authentication">
                         🪪
                       </span>
                     )}
@@ -893,10 +765,7 @@ export default function Home({}) {
                       </span>
                     )}
                     {validbefore != "" && (
-                      <span
-                        className="icon"
-                        title={`Valid before ${validbefore}`}
-                      >
+                      <span className="icon" title={`Valid before ${validbefore}`}>
                         ⏰
                       </span>
                     )}
@@ -942,10 +811,7 @@ export default function Home({}) {
                         }
                         let searchParams = new URLSearchParams();
                         for (let [key, value] of params) {
-                          if (
-                            key.startsWith(window.__PREFIX__) &&
-                            key.length > window.__PREFIX__.length
-                          ) {
+                          if (key.startsWith(window.__PREFIX__) && key.length > window.__PREFIX__.length) {
                             searchParams.append(key, value);
                             urlObj.searchParams.delete(key, value);
                             continue;
@@ -972,10 +838,7 @@ export default function Home({}) {
     values.addon = searchParams.get("addon") || "";
     searchParams.delete("addon");
     for (let [key, value] of searchParams) {
-      if (
-        !key.startsWith(window.__PREFIX__) ||
-        key.length == window.__PREFIX__.length
-      ) {
+      if (!key.startsWith(window.__PREFIX__) || key.length == window.__PREFIX__.length) {
         continue;
       }
       key = key.substring(window.__PREFIX__.length);
@@ -1033,8 +896,7 @@ export default function Home({}) {
             continue;
           }
         }
-        values.addon +=
-          window.__PREFIX__ + key + "=" + encodeURIComponent(value);
+        values.addon += window.__PREFIX__ + key + "=" + encodeURIComponent(value);
       }
     }
     let option = {
@@ -1073,24 +935,10 @@ export default function Home({}) {
 }
 
 function makeUrl(data: InputForm, prefix: string): string {
-  let {
-    url,
-    validtime,
-    fdua,
-    fdauth,
-    fdmethod,
-    fdbody,
-    fdtype,
-    addon,
-    ...others
-  } = data;
+  let { url, validtime, fdua, fdauth, fdmethod, fdbody, fdtype, addon, ...others } = data;
   // Unlike go's url.Parse, JavaScript's URL refues to handle schemeless url
   url = url.trim();
-  if (
-    !url.match(
-      /^((https?|unix|file|rclone|exec|curl\+[a-z][a-z0-9]*):\/\/|data:)/i
-    )
-  ) {
+  if (!url.match(/^((https?|unix|file|rclone|exec|curl\+[a-z][a-z0-9]*):\/\/|data:)/i)) {
     url = "https://" + url;
   }
   let urlObj = new URL(url);
@@ -1149,10 +997,7 @@ function makeUrl(data: InputForm, prefix: string): string {
   return urlObj.href;
 }
 
-function serializeInputForm(
-  data: InputForm,
-  encrypt: boolean
-): URLSearchParams {
+function serializeInputForm(data: InputForm, encrypt: boolean): URLSearchParams {
   let values: {
     [key: string]: any;
   } = {};
