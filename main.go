@@ -143,7 +143,6 @@ func main() {
 	fmt.Printf("Supported impersonates: %s\n", strings.Join(util.Impersonates, ", "))
 	fmt.Printf("Additional enabled protocols: file=%t, unix=%t, rclone=%t, curl=%t, exec=%t\n",
 		flags.EnableFile, flags.EnableUnix, flags.EnableRclone, flags.EnableCurl, flags.EnableExec)
-	fmt.Printf("Textual MIMEs in addition to 'text/*': %s\n", strings.Join(constants.TextualMediatypes, ", "))
 	fmt.Printf("Blacklist keytypes: %v\n", flags.KeytypeBlacklist)
 	if flags.Adminpath != "" {
 		fmt.Printf("Admin Web UI at %q with user/pass: %s:***\n", flags.Adminpath, flags.User)
@@ -163,7 +162,7 @@ func main() {
 		fmt.Printf("WARNING! Enabing non-http schemes without using signing is risky. You should only do it in local / test / sandbox env\n")
 	}
 	authenticator := auth.NewAuthenticator("website", false)
-	nonceTree := btree.NewG[constants.Nonce](4, constants.NonceLess)
+	nonceTree := btree.NewG(4, constants.NonceLess)
 	proxyHandle := http.StripPrefix(flags.Rootpath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxy.ProxyFunc(w, r, flags.Prefix, flags.Key, flags.KeytypeBlacklist, flags.OpenScopes, flags.OpenNormal,
 			flags.SupressError, flags.Log, flags.EnableUnix, flags.EnableFile, flags.EnableRclone, flags.EnableCurl,

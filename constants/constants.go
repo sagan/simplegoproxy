@@ -68,15 +68,30 @@ const INFINITE_TIMEOUT = 86400 * 365 * 100
 var EncryptedUrlRegex = regexp.MustCompile(`^((?P<eid>[_a-zA-Z0-9]+?)_)?(?P<eurl>[a-zA-Z0-9]{18,})(?P<epath>/.*)?$`)
 
 // textual metiatypes besides "text/*
-var TextualMediatypes = []string{
-	"application/json",
-	"application/javascript",
-	"application/xml",
-	"application/yaml",
-	"application/toml",
-	"application/atom+xml",
-	"application/x-sh",
-}
+var TextualMediatypes = func() map[string]bool {
+	typesMap := map[string]bool{}
+	types := []string{
+		"application/json",
+		"application/javascript",
+		"application/yaml",
+		"application/toml",
+		"application/xml",
+		"application/json5",   // json5
+		"application/xml-dtd", // .dtd
+		"application/atom+xml",
+		"application/rss+xml",   // .rss
+		"application/xhtml+xml", // .xhtml
+		"application/x-sh",      // .sh
+		"application/x-shellscript",
+		"application/x-pem-file", // .pem
+		"application/x-subrip",   // .srt
+		"image/svg+xml",          // .svg
+	}
+	for _, t := range types {
+		typesMap[t] = true
+	}
+	return typesMap
+}()
 
 // Copied from Chrome file:// url dir index page.
 // Go html/template format.

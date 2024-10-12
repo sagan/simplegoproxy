@@ -5,7 +5,7 @@ go 1.22.6
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/Noooste/azuretls-client v1.5.4
-	github.com/dop251/goja v0.0.0-20240927123429-241b342198c2
+	github.com/dop251/goja v0.0.0-20241009100908-5f46f2705ca3
 	github.com/dop251/goja_nodejs v0.0.0-20240728170619-29b559befffc
 	github.com/gomarkdown/markdown v0.0.0-20240930133441-72d49d9543d8
 	github.com/google/btree v1.1.3
@@ -27,15 +27,15 @@ require (
 	github.com/Noooste/fhttp v1.0.12 // indirect
 	github.com/Noooste/utls v1.2.10 // indirect
 	github.com/Noooste/websocket v1.0.3 // indirect
-	github.com/andybalholm/brotli v1.1.0 // indirect
-	github.com/cloudflare/circl v1.4.0 // indirect
+	github.com/andybalholm/brotli v1.1.1 // indirect
+	github.com/cloudflare/circl v1.5.0 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/fatih/color v1.17.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
-	github.com/google/pprof v0.0.0-20241001023024-f4c0cfd0cf1d // indirect
+	github.com/google/pprof v0.0.0-20241009165004-a3522334989c // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
-	github.com/klauspost/compress v1.17.10 // indirect
+	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect

@@ -1163,8 +1163,7 @@ func MediaType(contentType string) string {
 }
 
 func IsTextualMediaType(mediatype string) bool {
-	return mediatype != "" &&
-		(strings.HasPrefix(mediatype, "text/") || slices.Index(constants.TextualMediatypes, mediatype) != -1)
+	return mediatype != "" && (strings.HasPrefix(mediatype, "text/") || constants.TextualMediatypes[mediatype])
 }
 
 // Unmarshal a json / yaml / toml / xml string according to contentType.

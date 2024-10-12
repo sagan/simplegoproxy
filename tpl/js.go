@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/dop251/goja"
 
@@ -34,6 +35,7 @@ var _ constants.Template = (*JsTpl)(nil)
 var JsFuncs = map[string]any{
 	"btoa": btoa,
 	"atob": atob,
+	"env":  os.Getenv,
 }
 
 func init() {
