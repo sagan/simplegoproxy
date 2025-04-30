@@ -4,8 +4,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	"os"
 
+	"github.com/Masterminds/sprig/v3"
 	"github.com/dop251/goja"
 
 	"github.com/sagan/simplegoproxy/constants"
@@ -35,11 +38,16 @@ var _ constants.Template = (*JsTpl)(nil)
 var JsFuncs = map[string]any{
 	"btoa": btoa,
 	"atob": atob,
-	"env":  os.Getenv,
+
+	"env":       os.Getenv,
+	"expandenv": os.ExpandEnv,
+
+	"getHostByName": getHostByName,
+	"fetchUrl":      fetch,
 }
 
 func init() {
-	jsfuncs := []string{"fetch", "exec", "system", "randstring", "encrypt", "decrypt",
+	jsfuncs := []string{"exec", "system", "randstring", "encrypt", "decrypt", "md5sum",
 		"encrypt_binary", "decrypt_binary", "marshal", "unmarshal", "shlex_split"}
 	for _, name := range jsfuncs {
 		function := TemplateFuncMap[name]
@@ -48,6 +56,24 @@ func init() {
 		}
 		JsFuncs[name] = function
 	}
+
+	sprigFuncsMap := sprig.FuncMap()
+	names := []string{"sha1sum", "sha256sum", "sha512sum"} // expose some funcs from sprig to JavaScript runtime
+	for _, name := range names {
+		function := sprigFuncsMap[name]
+		if function == nil {
+			panic(fmt.Sprintf("sprig func %s not found", name))
+		}
+		JsFuncs[name] = function
+	}
+}
+
+func getHostByName(name string) string {
+	addrs, err := net.LookupHost(name)
+	if err != nil {
+		return ""
+	}
+	return addrs[rand.Intn(len(addrs))]
 }
 
 func Eval(vm *goja.Runtime, input any) (any, error) {

@@ -2,8 +2,10 @@ package tpl
 
 import (
 	"bytes"
+	"crypto/md5"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +34,8 @@ var TemplateFuncMap = map[string]any{
 	"decrypt":        decrypt,
 	"encrypt_binary": encrypt_binary,
 	"decrypt_binary": decrypt_binary,
+	"md5sum":         md5sum,
+	"hexdecode":      hexdecode,
 	"neg":            neg,
 	"abs":            absFunc,
 	"read":           read,
@@ -39,6 +43,19 @@ var TemplateFuncMap = map[string]any{
 	"fetch":          fetch,
 	"system":         system,
 	"exec":           execFunc,
+}
+
+func md5sum(input string) string {
+	hash := md5.Sum([]byte(input))
+	return hex.EncodeToString(hash[:])
+}
+
+func hexdecode(v string) string {
+	data, err := hex.DecodeString(v)
+	if err != nil {
+		return err.Error()
+	}
+	return string(data)
 }
 
 // Convert input to int. if failed to parse input as int, return 0.

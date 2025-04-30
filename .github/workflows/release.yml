@@ -21,7 +21,9 @@ jobs:
           cache: true
 
       - name: Install upx
-        run: sudo apt install upx -y
+        run: bash -c "curl -L https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz > /tmp/upx.tar.xz; tar xvf /tmp/upx.tar.xz -C /tmp/; sudo mv /tmp/upx-4.2.4-amd64_linux/upx /usr/bin"
+        # upx from repository is too old (3.x), not working on mips
+        # run: sudo apt install upx -y
 
       - uses: goreleaser/goreleaser-action@v6
         with:
