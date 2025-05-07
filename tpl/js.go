@@ -43,6 +43,8 @@ var JsFuncs = map[string]any{
 	"expandenv": os.ExpandEnv,
 
 	"getHostByName": getHostByName,
+	"getDomainSrv":  getDomainSrv,
+	"getDomainTxt":  getDomainTxt,
 	"fetchUrl":      fetch,
 }
 
@@ -66,6 +68,32 @@ func init() {
 		}
 		JsFuncs[name] = function
 	}
+}
+
+// Resolve the first address (ip:port) of a DNS SRV record.
+// E.g. "_service._tcp.example.com" => "1.2.3.4:80".
+// Return empty string if corresponding records don't exist or any error happened.
+func getDomainSrv(name string) string {
+	_, srvs, err := net.LookupSRV("", "", name)
+	if err != nil || len(srvs) < 1 {
+		return ""
+	}
+	srv := srvs[rand.Intn(len(srvs))]
+	addrs, err := net.LookupHost(srv.Target)
+	if err != nil || len(addrs) < 1 {
+		return ""
+	}
+	addr := addrs[rand.Intn(len(addrs))]
+	return net.JoinHostPort(addr, fmt.Sprintf("%d", srv.Port))
+}
+
+// Resolve the first result (text contents) of a DNS TXT record.
+func getDomainTxt(name string) string {
+	records, err := net.LookupTXT(name)
+	if err != nil || len(records) < 1 {
+		return ""
+	}
+	return records[0]
 }
 
 func getHostByName(name string) string {

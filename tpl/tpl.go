@@ -43,6 +43,9 @@ var TemplateFuncMap = map[string]any{
 	"fetch":          fetch,
 	"system":         system,
 	"exec":           execFunc,
+	"getHostByName":  getHostByName, // overwrite the sprig one because the latter doesn't handle error
+	"getDomainSrv":   getDomainSrv,
+	"getDomainTxt":   getDomainTxt,
 }
 
 func md5sum(input string) string {
